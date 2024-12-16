@@ -43,6 +43,11 @@ To search and send notifications via Gotify:
 docker run --rm --env-file=.env mediczuwacz find-appointment -r 204 -s 132 -f "2024-12-11" -c 49284 -n gotify -t "Pediatra"
 ```
 
+#### Example 4: Search for a Specific Doctor
+Use -d param:
+```bash
+docker run --rm --env-file=.env mediczuwacz find-appointment -r 204 -s 132 -d 394 -f "2024-12-16"
+```
 
 ---
 
