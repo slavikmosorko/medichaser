@@ -10,6 +10,7 @@ import string
 import uuid
 import argparse
 from urllib.parse import urlparse
+import datetime
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -118,7 +119,7 @@ class AppointmentFinder:
             "ClinicIds": clinic,
             "Page": 1,
             "PageSize": 5000,
-            "StartTime": start_date,
+            "StartTime": start_date.isoformat(),
             "SlotSearchType": 0,
             "VisitType": "Center",
         }
@@ -206,7 +207,7 @@ def main():
     find_appointment.add_argument("-s", "--specialty", required=True, type=int, action="extend", nargs="+", help="Specialty ID",)
     find_appointment.add_argument("-c", "--clinic", required=False, type=int, help="Clinic ID")
     find_appointment.add_argument("-d", "--doctor", required=False, type=int, help="Doctor ID")
-    find_appointment.add_argument("-f", "--date", required=True, help="Start date in YYYY-MM-DD format") 
+    find_appointment.add_argument("-f", "--date", type=datetime.date.fromisoformat, default=datetime.date.today(), help="Start date in YYYY-MM-DD format")
     find_appointment.add_argument("-n", "--notification", required=False, help="Notification method")
     find_appointment.add_argument("-t", "--title", required=False, help="Notification title")
 
