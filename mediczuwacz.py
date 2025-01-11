@@ -225,6 +225,10 @@ def main():
     username = os.environ.get("MEDICOVER_USER")
     password = os.environ.get("MEDICOVER_PASS")
 
+    if not username or not password:
+        console.print("[bold red]Error:[/bold red] MEDICOVER_USER and MEDICOVER_PASS environment variables must be set.")
+        exit(1)
+
     # Authenticate
     auth = Authenticator(username, password)
     auth.login()
