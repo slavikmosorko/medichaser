@@ -118,6 +118,23 @@ Set up a CRON job to check appointments every 10 minutes:
    */10 * * * * /home/projects/mediczuwacz/run_mediczuwacz.sh >> /home/projects/mediczuwacz/cron_log.txt 2>&1
    ```
 
+---
+
+## Local development
+
+Leverage the `-v` Docker flag to mount local files, allowing you to modify the Python script without needing to rebuild the Docker container. You can make changes to the script, run it via Docker, and see the updates immediately!
+
+Example: 
+
+Windows
+```
+run --rm -v %cd%/mediczuwacz.py:/app/mediczuwacz.py --env-file=.env mediczuwacz find-appointment -r 204 -s 132
+```
+
+Linux
+```
+docker run --rm -v $(pwd)/mediczuwacz.py:/app/mediczuwacz.py --env-file=.env mediczuwacz find-appointment -r 204 -s 132
+```
 
 ---
 
