@@ -120,6 +120,30 @@ Set up a CRON job to check appointments every 10 minutes:
 
 ---
 
+## Cron-like Monitoring on Windows
+
+Create a new file, e.g., `check_appointments_windows.bat`, to run the Docker command every 600 seconds (10 minutes). Example:
+
+```batch
+@echo off
+:loop
+docker run --rm --env-file=.env mediczuwacz find-appointment -r 204 -s 132
+timeout 600
+goto loop
+```
+
+### Running the Script
+1. Open **Command Prompt** (cmd).
+2. Run the script:
+   ```cmd
+   check_appointments_windows.bat
+   ```
+
+### Stopping the Script
+Press `CTRL+C` in the Command Prompt and confirm by typing `y`.
+
+---
+
 ## Local development
 
 Leverage the `-v` Docker flag to mount local files, allowing you to modify the Python script without needing to rebuild the Docker container. You can make changes to the script, run it via Docker, and see the updates immediately!
