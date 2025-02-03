@@ -162,7 +162,6 @@ class Notifier:
             specialty = appointment.get("specialty", {}).get("name", "N/A")
             doctor_languages = appointment.get("doctorLanguages", [])
             languages = ", ".join([lang.get("name", "N/A") for lang in doctor_languages]) if doctor_languages else "N/A"
-        
             message = (
                 f"Date: {date}\n"
                 f"Clinic: {clinic}\n"
