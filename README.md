@@ -44,9 +44,15 @@ docker run --rm --env-file=.env mediczuwacz find-appointment -r 204 -s 132 -f "2
 ```
 
 #### Example 4: Search for a Specific Doctor
-Use -d param:
+Use `-d` param:
 ```bash
 docker run --rm --env-file=.env mediczuwacz find-appointment -r 204 -s 132 -d 394 -f "2024-12-16"
+```
+
+#### Example 5: Search for a Dental Hygienist who speaks ukrainian
+Use `-l` param:
+```bash
+docker run --rm --env-file=.env mediczuwacz find-appointment -r 204 -s 112 -l 60
 ```
 
 ---
