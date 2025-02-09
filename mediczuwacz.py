@@ -111,7 +111,7 @@ class AppointmentFinder:
             )
             return {}
 
-    def find_appointments(self, region, specialty, clinic, start_date, doctor=None):
+    def find_appointments(self, region, specialty, clinic, start_date, language, doctor=None):
         appointment_url = "https://api-gateway-online24.medicover.pl/appointments/api/search-appointments/slots"
         params = {
             "RegionIds": region,
@@ -123,6 +123,9 @@ class AppointmentFinder:
             "SlotSearchType": 0,
             "VisitType": "Center",
         }
+
+        if language:
+            params["DoctorLanguageIds"] = language
 
         if doctor:
             params["DoctorIds"] = doctor
@@ -157,10 +160,13 @@ class Notifier:
             clinic = appointment.get("clinic", {}).get("name", "N/A")
             doctor = appointment.get("doctor", {}).get("name", "N/A")
             specialty = appointment.get("specialty", {}).get("name", "N/A")
+            doctor_languages = appointment.get("doctorLanguages", [])
+            languages = ", ".join([lang.get("name", "N/A") for lang in doctor_languages]) if doctor_languages else "N/A"
             message = (
                 f"Date: {date}\n"
                 f"Clinic: {clinic}\n"
                 f"Doctor: {doctor}\n"
+                f"Languages: {languages}\n" + 
                 f"Specialty: {specialty}\n" + "-" * 50
             )
             messages.append(message)
@@ -191,10 +197,13 @@ def display_appointments(appointments):
             clinic = appointment.get("clinic", {}).get("name", "N/A")
             doctor = appointment.get("doctor", {}).get("name", "N/A")
             specialty = appointment.get("specialty", {}).get("name", "N/A")
+            doctor_languages = appointment.get("doctorLanguages", [])
+            languages = ", ".join([lang.get("name", "N/A") for lang in doctor_languages]) if doctor_languages else "N/A"
             console.print(f"Date: {date}")
             console.print(f"  Clinic: {clinic}")
             console.print(f"  Doctor: {doctor}")
             console.print(f"  Specialty: {specialty}")
+            console.print(f"  Languages: {languages}")
             console.print("-" * 50)
 
 
@@ -210,6 +219,7 @@ def main():
     find_appointment.add_argument("-f", "--date", type=datetime.date.fromisoformat, default=datetime.date.today(), help="Start date in YYYY-MM-DD format")
     find_appointment.add_argument("-n", "--notification", required=False, help="Notification method")
     find_appointment.add_argument("-t", "--title", required=False, help="Notification title")
+    find_appointment.add_argument("-l", "--language", required=False, type=int, help="4=Polski, 6=Angielski, 60=Ukraiński")
 
     list_filters = subparsers.add_parser("list-filters", help="List filters")
     list_filters_subparsers = list_filters.add_subparsers(dest="filter_type", required=True, help="Type of filter to list")
@@ -237,7 +247,7 @@ def main():
 
     if args.command == "find-appointment":
         # Find appointments
-        appointments = finder.find_appointments(args.region, args.specialty, args.clinic, args.date, args.doctor)
+        appointments = finder.find_appointments(args.region, args.specialty, args.clinic, args.date, args.language, args.doctor)
 
         # Display appointments
         display_appointments(appointments)
