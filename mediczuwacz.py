@@ -18,6 +18,7 @@ from fake_useragent import UserAgent
 from future.backports.urllib.parse import parse_qs
 from rich import print_json, print
 from rich.console import Console
+import time
 
 from medihunter_notifiers import pushbullet_notify, pushover_notify, telegram_notify, xmpp_notify, gotify_notify
 
@@ -47,14 +48,15 @@ class Authenticator:
         device_id = str(uuid.uuid4())
         code_verifier = "".join(uuid.uuid4().hex for _ in range(3))
         code_challenge = self.generate_code_challenge(code_verifier)
+        epoch_time = int(time.time()) * 1000
 
         login_url = "https://login-online24.medicover.pl"
         oidc_redirect = "https://online24.medicover.pl/signin-oidc"
         auth_params = (
             f"?client_id=web&redirect_uri={oidc_redirect}&response_type=code"
             f"&scope=openid+offline_access+profile&state={state}&code_challenge={code_challenge}"
-            "&code_challenge_method=S256&response_mode=query&ui_locales=pl&app_version=3.2.0.482"
-            "&previous_app_version=3.2.0.482&device_id={device_id}&device_name=Chrome"
+            f"&code_challenge_method=S256&response_mode=query&ui_locales=pl&app_version=3.4.0-beta.1.0"
+            f"&previous_app_version=3.4.0-beta.1.0&device_id={device_id}&device_name=Chrome&ts={epoch_time}"
         )
 
         # Step 1: Initialize login
@@ -64,7 +66,11 @@ class Authenticator:
         # Step 2: Extract CSRF token
         response = self.session.get(next_url, headers=self.headers, allow_redirects=False)
         soup = BeautifulSoup(response.content, "html.parser")
-        csrf_token = soup.find("input", {"name": "__RequestVerificationToken"}).get("value")
+        csrf_input = soup.find("input", {"name": "__RequestVerificationToken"})
+        if csrf_input:
+            csrf_token = csrf_input.get("value")
+        else:
+            raise ValueError("CSRF token not found in the login page.")
 
         # Step 3: Submit login form
         login_data = {
@@ -166,7 +172,7 @@ class Notifier:
                 f"Date: {date}\n"
                 f"Clinic: {clinic}\n"
                 f"Doctor: {doctor}\n"
-                f"Languages: {languages}\n" + 
+                f"Languages: {languages}\n" +
                 f"Specialty: {specialty}\n" + "-" * 50
             )
             messages.append(message)
