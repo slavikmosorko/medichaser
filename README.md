@@ -158,7 +158,7 @@ Example:
 
 Windows
 ```
-run --rm -v %cd%/mediczuwacz.py:/app/mediczuwacz.py --env-file=.env mediczuwacz find-appointment -r 204 -s 132
+docker run --rm -v %cd%/mediczuwacz.py:/app/mediczuwacz.py --env-file=.env mediczuwacz find-appointment -r 204 -s 132
 ```
 
 Linux
@@ -176,6 +176,8 @@ docker run --rm -v $(pwd)/mediczuwacz.py:/app/mediczuwacz.py --env-file=.env med
 ### v0.2 - 2024-12-13
 - Added the `list-filters` command (by areqq).
 
+### v0.3 - 2025-02-22
+- Fixed {epoch_time} auth bug (thanks pogarek & Odnoklubov).
 
 ---
 
