@@ -13,11 +13,14 @@ RUN apk add --no-cache \
 
 WORKDIR /app/
 
-# Copy necessary files
-COPY ["mediczuwacz.py", "setup.py", "medihunter_notifiers.py", "/app/"]
+# Copy setup.py
+COPY ["setup.py", "/app/"]
 
 # Install Python dependencies
 RUN pip install --no-cache-dir "setuptools<58.0.0" rpds-py future rich && \
     pip install --no-cache-dir .
+
+# Copy necessary files
+COPY ["mediczuwacz.py", "medihunter_notifiers.py", "/app/"]
 
 ENTRYPOINT ["python", "./mediczuwacz.py"]
