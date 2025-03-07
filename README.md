@@ -1,11 +1,12 @@
 # MediCzuwacz
 
-Monitor new Medicover appointments with MediCzuwacz, designed to work with the latest authentication system (as of December 2024).
+Monitor new Medicover appointments with MediCzuwacz.
 
 - Automate appointment monitoring
 - Supports notifications via Gotify and other providers.
 - Easy setup and automation with Docker.
 
+![MediCzuwacz](https://raw.githubusercontent.com/SteveSteve24/MediCzuwacz/refs/heads/main/mediczuwacz.png)
  
 ---
 
