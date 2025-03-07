@@ -43,16 +43,21 @@ To search and send notifications via Gotify:
 docker run --rm --env-file=.env mediczuwacz find-appointment -r 204 -s 132 -f "2024-12-11" -c 49284 -n gotify -t "Pediatra"
 ```
 
-#### Example 4: Search for a Specific Doctor
+#### Example 4: Search for a Specific Doctor and set End date
 Use `-d` param:
 ```bash
-docker run --rm --env-file=.env mediczuwacz find-appointment -r 204 -s 132 -d 394 -f "2024-12-16"
+docker run --rm --env-file=.env mediczuwacz find-appointment -r 204 -s 132 -d 394 -f "2024-12-16" -e "2024-12-19"
 ```
 
 #### Example 5: Search for a Dental Hygienist who speaks ukrainian
 Use `-l` param:
 ```bash
 docker run --rm --env-file=.env mediczuwacz find-appointment -r 204 -s 112 -l 60
+```
+
+#### Example 6: start once and check for new Appointments every 10 minutes
+```bash
+docker run --rm --env-file=.env mediczuwacz find-appointment -r 204 -s 112 -i 10
 ```
 
 ---
@@ -150,6 +155,19 @@ Press `CTRL+C` in the Command Prompt and confirm by typing `y`.
 
 ---
 
+## Run docker with interval
+
+This command starts a container that checks for new appointments every 25 minutes. It will display either new appointment details or "No new appointments found."
+
+Use the `-i` parameter to set the interval (in minutes):
+
+```bash
+docker run --rm --env-file=.env mediczuwacz find-appointment -r 204 -s 112 -i 25
+```
+
+
+---
+
 ## Local development
 
 Leverage the `-v` Docker flag to mount local files, allowing you to modify the Python script without needing to rebuild the Docker container. You can make changes to the script, run it via Docker, and see the updates immediately!
@@ -178,6 +196,9 @@ docker run --rm -v $(pwd)/mediczuwacz.py:/app/mediczuwacz.py --env-file=.env med
 
 ### v0.3 - 2025-02-22
 - Fixed {epoch_time} auth bug (thanks pogarek & Odnoklubov).
+
+### v0.4 - 2025-03-07
+- Added `interval` and `enddate` parameters, docker file optimization (by vitgorbunov).
 
 ---
 
