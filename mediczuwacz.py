@@ -117,7 +117,7 @@ class AppointmentFinder:
             )
             return {}
 
-    def find_appointments(self, region, specialty, clinic, start_date, language, doctor=None):
+    def find_appointments(self, region, specialty, clinic, start_date, end_date, language, doctor=None):
         appointment_url = "https://api-gateway-online24.medicover.pl/appointments/api/search-appointments/slots"
         params = {
             "RegionIds": region,
@@ -138,7 +138,12 @@ class AppointmentFinder:
 
         response = self.http_get(appointment_url, params)
 
-        return response.get("items", [])
+        items = response.get("items", [])
+
+        if end_date:
+            items = [x for x in items if datetime.datetime.fromisoformat(x["appointmentDate"]).date() <= end_date]
+
+        return items
 
     def find_filters(self, region=None, specialty=None):
         filters_url = "https://api-gateway-online24.medicover.pl/appointments/api/search-appointments/filters"
@@ -195,9 +200,13 @@ class Notifier:
 
 
 def display_appointments(appointments):
+    console.print()
+    console.print("-" * 50)
     if not appointments:
-        console.print("No appointments found.")
+        console.print("No new appointments found.")
     else:
+        console.print("New appointments found:")
+        console.print("-" * 50)
         for appointment in appointments:
             date = appointment.get("appointmentDate", "N/A")
             clinic = appointment.get("clinic", {}).get("name", "N/A")
@@ -223,9 +232,11 @@ def main():
     find_appointment.add_argument("-c", "--clinic", required=False, type=int, help="Clinic ID")
     find_appointment.add_argument("-d", "--doctor", required=False, type=int, help="Doctor ID")
     find_appointment.add_argument("-f", "--date", type=datetime.date.fromisoformat, default=datetime.date.today(), help="Start date in YYYY-MM-DD format")
+    find_appointment.add_argument("-e", "--enddate", type=datetime.date.fromisoformat, help="End date in YYYY-MM-DD format")
     find_appointment.add_argument("-n", "--notification", required=False, help="Notification method")
     find_appointment.add_argument("-t", "--title", required=False, help="Notification title")
     find_appointment.add_argument("-l", "--language", required=False, type=int, help="4=Polski, 6=Angielski, 60=Ukraiński")
+    find_appointment.add_argument("-i", "--interval", required=False, type=int, help="Repeat interval in minutes")
 
     list_filters = subparsers.add_parser("list-filters", help="List filters")
     list_filters_subparsers = list_filters.add_subparsers(dest="filter_type", required=True, help="Type of filter to list")
@@ -245,32 +256,50 @@ def main():
         console.print("[bold red]Error:[/bold red] MEDICOVER_USER and MEDICOVER_PASS environment variables must be set.")
         exit(1)
 
-    # Authenticate
-    auth = Authenticator(username, password)
-    auth.login()
+    previous_appointments = []
 
-    finder = AppointmentFinder(auth.session, auth.headers)
+    while True:
+        # Authenticate
+        auth = Authenticator(username, password)
+        auth.login()
+    
+        finder = AppointmentFinder(auth.session, auth.headers)
+    
+        if args.command == "find-appointment":
+            # Find appointments
+            appointments = finder.find_appointments(args.region, args.specialty, args.clinic, args.date, args.enddate, args.language, args.doctor)
 
-    if args.command == "find-appointment":
-        # Find appointments
-        appointments = finder.find_appointments(args.region, args.specialty, args.clinic, args.date, args.language, args.doctor)
+            # Find new appointments
+            if previous_appointments:
+                new_appointments = [x for x in appointments if x not in previous_appointments]
+            else:
+                new_appointments = appointments
 
-        # Display appointments
-        display_appointments(appointments)
+            previous_appointments = appointments
+    
+            # Display appointments
+            display_appointments(new_appointments)
+    
+            # Send notification if appointments are found
+            if new_appointments:
+                Notifier.send_notification(new_appointments, args.notification, args.title)
 
-        # Send notification if appointments are found
-        if appointments:
-            Notifier.send_notification(appointments, args.notification, args.title)
+            if args.interval:
+                # Sleep and repeat
+                time.sleep(args.interval * 60)
+                continue
+    
+        elif args.command == "list-filters":
+    
+            if args.filter_type == "doctors":
+                filters = finder.find_filters(args.region, args.specialty)
+            else:
+                filters = finder.find_filters()
+    
+            for r in filters[args.filter_type]:
+                print(f"{r['id']} - {r['value']}")
 
-    elif args.command == "list-filters":
-
-        if args.filter_type == "doctors":
-            filters = finder.find_filters(args.region, args.specialty)
-        else:
-            filters = finder.find_filters()
-
-        for r in filters[args.filter_type]:
-            print(f"{r['id']} - {r['value']}")
+        break
 
 if __name__ == "__main__":
     main()
