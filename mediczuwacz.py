@@ -246,6 +246,10 @@ def main():
     doctors = list_filters_subparsers.add_parser("doctors", help="List available doctors")
     doctors.add_argument("-r", "--region", required=True, type=int, help="Region ID")
     doctors.add_argument("-s", "--specialty", required=True, type=int, help="Specialty ID")
+    clinics = list_filters_subparsers.add_parser("clinics", help="List available clinics")
+    clinics.add_argument("-r", "--region", required=True, type=int, help="Region ID")
+    clinics.add_argument("-s", "--specialty", required=True, type=int, nargs="+", help="Specialty ID(s)")
+
 
     args = parser.parse_args()
 
@@ -291,13 +295,15 @@ def main():
     
         elif args.command == "list-filters":
     
-            if args.filter_type == "doctors":
+            if args.filter_type in ("doctors", "clinics"):
                 filters = finder.find_filters(args.region, args.specialty)
             else:
                 filters = finder.find_filters()
+
     
             for r in filters[args.filter_type]:
                 print(f"{r['id']} - {r['value']}")
+
 
         break
 
