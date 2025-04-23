@@ -1,10 +1,11 @@
 # MediCzuwacz
 
-Monitor new Medicover appointments with MediCzuwacz.
+Easily track when your Medicover doctor has open appointments.
 
-- Automate appointment monitoring
-- Supports notifications via Gotify and other providers.
-- Easy setup and automation with Docker.
+- Automatically logs in to your Medicover account
+- Checks for new available visits with selected doctors, clinics, or specialties
+- Sends instant notifications (Gotify, Telegram, and more)
+- Simple to set up and automate using Docker
 
 ![MediCzuwacz](https://raw.githubusercontent.com/SteveSteve24/MediCzuwacz/refs/heads/main/mediczuwacz.png)
  
@@ -76,6 +77,11 @@ Run the following commands:
 - To list available specialties:
   ```bash
   docker run --rm --env-file=.env mediczuwacz list-filters specialties
+  ```
+
+- To list clinics for a specific region and specialty:
+  ```bash
+  docker run --rm --env-file=.env mediczuwacz list-filters clinics -r 204 -s 132
   ```
 
 - To list doctors for a specific region and specialty:
@@ -200,6 +206,9 @@ docker run --rm -v $(pwd)/mediczuwacz.py:/app/mediczuwacz.py --env-file=.env med
 
 ### v0.4 - 2025-03-07
 - Added `interval` and `enddate` parameters, docker file optimization (by vitgorbunov).
+
+### v0.5 - 2025-04-23
+- Added `list-filters clinics` support.
 
 ---
 
