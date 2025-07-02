@@ -44,7 +44,6 @@ class Authenticator:
         self.headers = {
             "User-Agent": UserAgent().random,
             "Accept": "application/json",
-            "Authorization": None,
         }
         self.tokenA = None
         self.tokenR = None
@@ -52,9 +51,19 @@ class Authenticator:
 
     def refresh_token(self):
         """Refresh the access token using the refresh token."""
+        if (
+            self.tokenA
+            and self.tokenR
+            and self.expires_at
+            and self.expires_at > int(time.time())
+        ):
+            print("access token is still valid, no need to refresh.")
+            return
+
         if not self.tokenR:
             print("No refresh token available, cannot refresh access token.")
             return
+
         print("Refreshing access token...")
         refresh_token_data = {
             "grant_type": "refresh_token",
@@ -62,7 +71,10 @@ class Authenticator:
             "scope": "openid offline_access profile",
             "client_id": "web",
         }
+        if "Authorization" in self.headers:
+            del self.headers["Authorization"]  # Remove old token if present
 
+        # Use the refresh token to get a new access token
         response = self.session.post(
             "https://login-online24.medicover.pl/connect/token",
             data=refresh_token_data,
@@ -95,6 +107,11 @@ class Authenticator:
         TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
         TOKEN_PATH.write_text(json.dumps(data, indent=4))
 
+        self.headers["Authorization"] = f"Bearer {self.tokenA}"
+        self.tokenA = data.get("access_token")
+        self.tokenR = data.get("refresh_token")
+        self.expires_at = data.get("expires_at")
+
     def use_saved_token(self):
         """Load saved token from file if it exists."""
         if TOKEN_PATH.exists():
@@ -105,7 +122,7 @@ class Authenticator:
                 self.expires_at = token_data.get("expires_at")
                 self.expires_in = token_data.get("expires_in")
                 if self.expires_at and self.expires_at < int(time.time()):
-                    print("First access token expired, refreshing...")
+                    print("access token expired, refreshing...")
                     self.refresh_token()
 
                 if self.tokenA and self.tokenR:
@@ -496,10 +513,12 @@ def main():
 
     previous_appointments = []
 
+    auth = Authenticator(username, password)
+    auth.login()
+
     while True:
         # Authenticate
-        auth = Authenticator(username, password)
-        auth.login()
+        auth.refresh_token()
 
         finder = AppointmentFinder(auth.session, auth.headers)
 
