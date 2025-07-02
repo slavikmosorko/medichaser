@@ -1,0 +1,12 @@
+services:
+  medihunter_ttyd:
+    restart: "no"
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - "./logs:/app/logs"
+    ports:
+      - 7681:7681

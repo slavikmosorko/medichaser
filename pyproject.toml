@@ -1,0 +1,45 @@
+[tool.poetry]
+authors = []
+description = "mediczuwacz fork with selenium and mfa"
+license = "GNU GPLv3"
+name = "mediczuwacz"
+readme = "README.md"
+version = "0.5.0"
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, pylint, pyupgrade
+ignore = ["E501", "PLR0915", "PLR2004"]
+select = ["E", "F", "I", "PL", "UP", "W"]
+
+[tool.ruff.lint.pylint]
+max-args = 12
+max-branches = 20
+
+[tool.poetry.dependencies]
+appdirs = ">=1.4.4,<2.0.0"
+beautifulsoup4 = ">=4.13.4,<5.0.0"
+click = ">=8.2.1,<9.0.0"
+fake-useragent = ">=2.2.0,<3.0.0"
+lxml = ">=6.0.0,<7.0.0"
+notifiers = ">=1.3.6,<2.0.0"
+python = ">=3.13"
+python-dotenv = ">=1.1.1,<2.0.0"
+requests = ">=2.32.4,<3.0.0"
+rich = "^14.0.0"
+selenium = ">=4.34.0,<5.0.0"
+selenium-stealth = ">=1.0.6,<2.0.0"
+setuptools = ">=65.5.0,<66.0.0"
+xmpppy = ">=0.7.1,<0.8.0"
+
+[tool.poetry.scripts]
+mediczuwacz = "mediczuwacz:mediczuwacz"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.12.1"
+
+[build-system]
+build-backend = "poetry.core.masonry.api"
+requires = ["poetry-core>=1.0.0"]

@@ -1,26 +1,25 @@
-FROM python:3.9-alpine
+FROM python:3.13-slim AS base
 
-# Install system dependencies
-RUN apk add --no-cache \
-    libxml2 \
-    libxslt \
-    libxml2-dev \
-    libxslt-dev \
-    gcc \
-    musl-dev \
-    python3-dev \
-    py3-pip
+RUN apt-get -y update && apt-get -y install wget tini git nano vim procps screen
+RUN wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/bin/ttyd
+RUN chmod +x /usr/bin/ttyd
 
-WORKDIR /app/
+EXPOSE 7681
 
-# Copy setup.py
-COPY ["setup.py", "/app/"]
+WORKDIR /app
 
-# Install Python dependencies
-RUN pip install --no-cache-dir "setuptools<58.0.0" rpds-py future rich && \
-    pip install --no-cache-dir .
+FROM base AS poetry
+RUN --mount=type=cache,target=/root/.cache/pip pip install poetry==2.0.1
+RUN --mount=type=cache,target=/root/.cache/pip poetry self add poetry-plugin-export
+COPY poetry.lock pyproject.toml ./
+RUN poetry export -o  /requirements.txt --without-hashes --without="dev"
 
-# Copy necessary files
-COPY ["mediczuwacz.py", "medihunter_notifiers.py", "/app/"]
+FROM base AS app
 
-ENTRYPOINT ["python", "./mediczuwacz.py"]
+COPY --from=poetry /requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY mediczuwacz.py medihunter_notifiers.py ./
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["ttyd", "-W", "bash"]
