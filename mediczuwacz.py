@@ -18,7 +18,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium_stealth import stealth
-
+from requests.adapters import HTTPAdapter
+from requests.exceptions import ConnectionError, Timeout
+from urllib3.util import Retry
 from medihunter_notifiers import (
     gotify_notify,
     pushbullet_notify,
@@ -35,12 +37,23 @@ console = Console()
 # Load environment variables
 load_dotenv()
 
+retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[500, 502, 503, 504],
+    connect=5,
+    read=5,
+    redirect=5,
+)
+global_adapter = HTTPAdapter(max_retries=retry_strategy)
+
 
 class Authenticator:
     def __init__(self, username, password):
         self.username = username
         self.password = password
         self.session = requests.Session()
+        self.session.mount("https://", global_adapter)
         self.headers = {
             "User-Agent": UserAgent().random,
             "Accept": "application/json",
