@@ -11,6 +11,7 @@ import time
 import requests
 from dotenv import load_dotenv
 from fake_useragent import UserAgent
+from requests.adapters import HTTPAdapter
 from rich import print
 from rich.console import Console
 from selenium import webdriver
@@ -18,9 +19,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium_stealth import stealth
-from requests.adapters import HTTPAdapter
-from requests.exceptions import ConnectionError, Timeout
 from urllib3.util import Retry
+
 from medihunter_notifiers import (
     gotify_notify,
     pushbullet_notify,
