@@ -30,8 +30,9 @@ from medihunter_notifiers import (
 )
 
 CURRENT_PATH = pathlib.Path(__file__).parent.resolve()
-TOKEN_PATH = CURRENT_PATH / "data/medicover_token.json"
-TOKEN_PATH_OLD = CURRENT_PATH / "data/medicover_token_old.json"
+DATA_PATH = CURRENT_PATH / "data"
+TOKEN_PATH = DATA_PATH / "medicover_token.json"
+TOKEN_PATH_OLD = DATA_PATH / "medicover_token_old.json"
 console = Console()
 
 # Load environment variables
@@ -153,6 +154,7 @@ class Authenticator:
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+        options.add_argument(f"--user-data-dir={DATA_PATH}")
 
         driver = webdriver.Chrome(options=options)
         wait = WebDriverWait(driver, 8)
