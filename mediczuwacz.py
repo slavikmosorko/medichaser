@@ -268,6 +268,11 @@ class Authenticator:
         for i in range(6):
             mfa_inputs[i].send_keys(mfa_code[i])
 
+        trusted_device_checkbox = wait.until(
+            EC.element_to_be_clickable((By.ID, "isTrustedDeviceCheckbox"))
+        )
+        trusted_device_checkbox.click()
+
         try:
             mfa_button = wait.until(EC.element_to_be_clickable((By.ID, "mfa-button")))
             mfa_button.click()
