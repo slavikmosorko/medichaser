@@ -5,6 +5,7 @@ import datetime
 import json
 import os
 import pathlib
+import sys
 import time
 
 import requests
@@ -27,7 +28,8 @@ from medihunter_notifiers import (
 )
 
 CURRENT_PATH = pathlib.Path(__file__).parent.resolve()
-TOKEN_PATH = CURRENT_PATH / "medihunter_token.json"
+TOKEN_PATH = CURRENT_PATH / "data/medicover_token.json"
+TOKEN_PATH_OLD = CURRENT_PATH / "data/medicover_token_old.json"
 console = Console()
 
 # Load environment variables
@@ -46,6 +48,52 @@ class Authenticator:
         }
         self.tokenA = None
         self.tokenR = None
+        self.expires_at = None
+
+    def refresh_token(self):
+        """Refresh the access token using the refresh token."""
+        if not self.tokenR:
+            print("No refresh token available, cannot refresh access token.")
+            return
+        print("Refreshing access token...")
+        refresh_token_data = {
+            "grant_type": "refresh_token",
+            "refresh_token": self.tokenR,
+            "scope": "openid offline_access profile",
+            "client_id": "web",
+        }
+
+        response = self.session.post(
+            "https://login-online24.medicover.pl/connect/token",
+            data=refresh_token_data,
+            headers=self.headers,
+            allow_redirects=False,
+        )
+
+        if response.status_code != 200:
+            print(f"Failed to refresh token: {response.status_code} {response.text}")
+            TOKEN_PATH_OLD.write_text(
+                TOKEN_PATH.read_text()
+            )  # Save old token if refresh fails
+            TOKEN_PATH.unlink(missing_ok=True)  # Remove current token file
+            return
+
+        data = response.json()
+        if "error" in data:
+            print(f"Failed to refresh token: {response.status_code} {response.text}")
+            TOKEN_PATH_OLD.write_text(
+                TOKEN_PATH.read_text()
+            )  # Save old token if refresh fails
+            TOKEN_PATH.unlink(missing_ok=True)  # Remove current token file
+            return
+
+        # manually set expires_at
+        expires_in = data.get("expires_in")
+        expires_at = int(time.time()) + expires_in if expires_in else None
+        data["expires_at"] = expires_at
+
+        TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        TOKEN_PATH.write_text(json.dumps(data, indent=4))
 
     def use_saved_token(self):
         """Load saved token from file if it exists."""
@@ -54,6 +102,12 @@ class Authenticator:
                 token_data = json.load(f)
                 self.tokenA = token_data.get("access_token")
                 self.tokenR = token_data.get("refresh_token")
+                self.expires_at = token_data.get("expires_at")
+                self.expires_in = token_data.get("expires_in")
+                if self.expires_at and self.expires_at < int(time.time()):
+                    print("First access token expired, refreshing...")
+                    self.refresh_token()
+
                 if self.tokenA and self.tokenR:
                     self.headers["Authorization"] = f"Bearer {self.tokenA}"
                     print("Using saved access token.")
@@ -65,10 +119,13 @@ class Authenticator:
 
         print("No valid saved token found, logging in with username and password.")
         options = webdriver.ChromeOptions()
-        options.add_argument("--headless=new")  # Run in headless mode
+        options.add_argument("--headless")  # Run in headless mode
         options.add_argument("--disable-gpu")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+
         driver = webdriver.Chrome(options=options)
-        wait = WebDriverWait(driver, 5)
+        wait = WebDriverWait(driver, 8)
         stealth(
             driver,
             languages=["en-US", "en"],
@@ -87,7 +144,7 @@ class Authenticator:
             print("Could not redirect to login page, printing page source")
             print(driver.page_source)
             driver.quit()
-            exit(1)
+            sys.exit(1)
 
         try:
             wait.until(EC.presence_of_element_located((By.ID, "cmpwrapper")))
@@ -112,7 +169,7 @@ class Authenticator:
             print(f"Error waiting for username or password field: {e}")
             print(driver.page_source)
             driver.quit()
-            exit(1)
+            sys.exit(1)
 
         username_field.send_keys(self.username)
         password_field.send_keys(self.password)
@@ -141,7 +198,7 @@ class Authenticator:
 
             print(driver.page_source)
             driver.quit()
-            exit(1)
+            sys.exit(1)
 
         try:
             wait.until(EC.url_contains("signin-oidc"))
@@ -156,7 +213,7 @@ class Authenticator:
             print("MFA page did not load, printing page source")
             print(driver.page_source)
             driver.quit()
-            exit(1)
+            sys.exit(1)
 
         try:
             wait.until(EC.presence_of_element_located((By.ID, "cmpwrapper")))
@@ -174,7 +231,7 @@ class Authenticator:
         if len(mfa_code) != 6:
             print("MFA code must be 6 digits.")
             driver.quit()
-            exit(1)
+            sys.exit(1)
 
         mfa_inputs = driver.find_elements(By.CSS_SELECTOR, "div.mfa-pin-group input")
 
@@ -189,30 +246,22 @@ class Authenticator:
             print(f"Error clicking MFA button: {e}")
             print(driver.page_source)
             driver.quit()
-            exit(1)
+            sys.exit(1)
+
+        time.sleep(10)  # Wait for the page to fully load
 
         try:
-            wait.until(EC.url_contains("signin-oidc"))
-        except Exception:
-            print("Login failed after MFA, printing page source")
+            token_data = driver.execute_script(
+                "return localStorage.getItem('oidc.user:https://login-online24.medicover.pl/:web');"
+            )
+            token_json = json.loads(token_data)
+        except Exception as e:
+            print(f"Error retrieving token from localStorage: {e}")
             print(driver.page_source)
             driver.quit()
-            exit(1)
+            sys.exit(1)
 
-        try:
-            wait.until(EC.url_contains("home"))
-        except Exception:
-            print("Login failed after MFA, printing page source")
-            print(driver.page_source)
-            driver.quit()
-            exit(1)
-
-        time.sleep(2)  # Wait for the page to fully load
-
-        token_data = driver.execute_script(
-            "return localStorage.getItem('oidc.user:https://login-online24.medicover.pl/:web');"
-        )
-        token_json = json.loads(token_data)
+        TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
         TOKEN_PATH.write_text(json.dumps(token_json, indent=4))
 
         access_token = token_json.get("access_token")
@@ -417,12 +466,8 @@ def main():
         dest="filter_type", required=True, help="Type of filter to list"
     )
 
-    regions = list_filters_subparsers.add_parser(
-        "regions", help="List available regions"
-    )
-    specialties = list_filters_subparsers.add_parser(
-        "specialties", help="List available specialties"
-    )
+    list_filters_subparsers.add_parser("regions", help="List available regions")
+    list_filters_subparsers.add_parser("specialties", help="List available specialties")
     doctors = list_filters_subparsers.add_parser(
         "doctors", help="List available doctors"
     )
@@ -447,7 +492,7 @@ def main():
         console.print(
             "[bold red]Error:[/bold red] MEDICOVER_USER and MEDICOVER_PASS environment variables must be set."
         )
-        exit(1)
+        sys.exit(1)
 
     previous_appointments = []
 

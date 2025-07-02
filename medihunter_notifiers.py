@@ -3,14 +3,14 @@ from os import environ
 import requests
 from notifiers import get_notifier
 from notifiers.exceptions import BadArguments
-from xmpp import *
+from xmpp import xmpp
 
 pushbullet = get_notifier("pushbullet")
 pushover = get_notifier("pushover")
 telegram = get_notifier("telegram")
 
 
-def pushbullet_notify(message, title: str = None):
+def pushbullet_notify(message, title: str | None = None):
     try:
         if title is None:
             r = pushbullet.notify(message=message)
@@ -24,7 +24,7 @@ def pushbullet_notify(message, title: str = None):
         print(f"Pushbullet notification failed:\n{r.errors}")
 
 
-def pushover_notify(message, title: str = None):
+def pushover_notify(message, title: str | None = None):
     try:
         if title is None:
             r = pushover.notify(message=message)
@@ -38,7 +38,7 @@ def pushover_notify(message, title: str = None):
         print(f"Pushover notification failed:\n{r.errors}")
 
 
-def telegram_notify(message, title: str = None):
+def telegram_notify(message, title: str | None = None):
     try:
         if title:
             message = f"<b>{title}</b>\n{message}"
@@ -70,7 +70,7 @@ def xmpp_notify(message):
                     user=r.getNode(), password=password, resource=r.getResource()
                 )
             )
-            or (not conn.send(xmpp.protocol.Message(to=receiver, body=message)))
+            or (not conn.send(xmpp.protocol.Message(to=receiver, body=message)))  # type: ignore
         ):
             print("XMPP notification failed")
     except KeyError as e:
@@ -80,7 +80,7 @@ def xmpp_notify(message):
         )
 
 
-def gotify_notify(message, title: str = None):
+def gotify_notify(message, title: str | None = None):
     try:
         host = environ["GOTIFY_HOST"]
         token = environ["GOTIFY_TOKEN"]
@@ -100,7 +100,7 @@ def gotify_notify(message, title: str = None):
         title = "medihunter"
 
     try:
-        resp = requests.post(
+        requests.post(
             host + "/message?token=" + token,
             json={"message": message, "priority": int(prio), "title": title},
         )
