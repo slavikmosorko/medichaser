@@ -4,6 +4,8 @@ RUN apt-get -y update && apt-get -y install wget tini git nano vim procps screen
 RUN wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/bin/ttyd
 RUN chmod +x /usr/bin/ttyd
 
+RUN groupadd --gid 1000 selenium && useradd -m --uid 1000 --gid 1000 -s /bin/bash selenium
+
 # Install Chrome and its dependencies
 # Using a specific version of Chrome is often safer for consistency, but 'google-chrome-stable' is fine for general use.
 RUN apt-get update && apt-get install -y \
@@ -44,9 +46,12 @@ COPY --from=poetry /requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY mediczuwacz.py medihunter_notifiers.py ./
+RUN chown -R selenium:selenium /app
 
 ENV PROMPT_COMMAND='history -a'
 ENV HISTFILE=/app/data/.bash_history
+
+USER selenium
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["ttyd", "-W", "bash"]

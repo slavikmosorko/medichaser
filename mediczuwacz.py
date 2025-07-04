@@ -20,7 +20,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium_stealth import stealth
 from urllib3.util import Retry
-
+from filelock import FileLock
 from medihunter_notifiers import (
     gotify_notify,
     pushbullet_notify,
@@ -32,7 +32,9 @@ from medihunter_notifiers import (
 CURRENT_PATH = pathlib.Path(__file__).parent.resolve()
 DATA_PATH = CURRENT_PATH / "data"
 TOKEN_PATH = DATA_PATH / "medicover_token.json"
-TOKEN_PATH_OLD = DATA_PATH / "medicover_token_old.json"
+TOKEN_LOCK_PATH = DATA_PATH / "medicover_token.lock"
+
+token_lock = FileLock(TOKEN_LOCK_PATH, timeout=10)
 console = Console()
 
 # Load environment variables
@@ -63,6 +65,7 @@ class Authenticator:
         self.tokenR = None
         self.expires_at = None
 
+    @token_lock
     def refresh_token(self):
         """Refresh the access token using the refresh token."""
         if (
@@ -96,20 +99,9 @@ class Authenticator:
             allow_redirects=False,
         )
 
-        if response.status_code != 200:
-            print(f"Failed to refresh token: {response.status_code} {response.text}")
-            TOKEN_PATH_OLD.write_text(
-                TOKEN_PATH.read_text()
-            )  # Save old token if refresh fails
-            TOKEN_PATH.unlink(missing_ok=True)  # Remove current token file
-            return
-
         data = response.json()
         if "error" in data:
             print(f"Failed to refresh token: {response.status_code} {response.text}")
-            TOKEN_PATH_OLD.write_text(
-                TOKEN_PATH.read_text()
-            )  # Save old token if refresh fails
             TOKEN_PATH.unlink(missing_ok=True)  # Remove current token file
             return
 
@@ -154,13 +146,12 @@ class Authenticator:
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument(f"--user-data-dir={DATA_PATH}")
 
         driver = webdriver.Chrome(options=options)
         wait = WebDriverWait(driver, 8)
         stealth(
             driver,
-            languages=["en-US", "en"],
+            languages=["pl-PL", "pl"],
             vendor="Google Inc.",
             platform="Win32",
             webgl_vendor="Intel Inc.",
@@ -305,6 +296,8 @@ class Authenticator:
 
         self.tokenA = access_token
         self.headers["Authorization"] = f"Bearer {self.tokenA}"
+
+        driver.quit()
 
 
 class AppointmentFinder:

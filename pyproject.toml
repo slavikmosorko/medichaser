@@ -33,6 +33,7 @@ selenium = ">=4.34.0,<5.0.0"
 selenium-stealth = ">=1.0.6,<2.0.0"
 setuptools = ">=65.5.0,<66.0.0"
 xmpppy = ">=0.7.1,<0.8.0"
+filelock = "^3.18.0"
 
 [tool.poetry.scripts]
 mediczuwacz = "mediczuwacz:mediczuwacz"
