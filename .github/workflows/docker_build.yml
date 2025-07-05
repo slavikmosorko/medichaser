@@ -1,8 +1,9 @@
 name: push image to dockerhub on release
 on:
-  release:
-    types:
-      - created
+  push:
+    branches:
+      - "master"
+    tags:
 
 jobs:
   push_latest_image_to_dockerhub:
@@ -21,6 +22,11 @@ jobs:
         uses: docker/setup-buildx-action@v3
         with:
           version: latest
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: rafsaf/mediczuwacz_ttyd
 
       - name: Login to DockerHub
         uses: docker/login-action@v3
@@ -52,6 +58,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           context: .
-          push: true
-          tags: rafsaf/mediczuwacz_ttyd:${{ github.ref_name }},rafsaf/mediczuwacz_ttyd:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64
