@@ -1,3 +1,9 @@
+# Why forked
+
+- added refresh token
+- support to mfa
+- run in web terminal - https://github.com/tsl0922/ttyd - this allows to remotely control this if hosted somewhere.
+
 # MediCzuwacz
 
 Easily track when your Medicover doctor has open appointments.
