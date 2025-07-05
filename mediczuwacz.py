@@ -630,6 +630,8 @@ def main():
                 )
                 break
 
+            continue
+
         elif args.command == "list-filters":
             if args.filter_type in ("doctors", "clinics"):
                 filters = finder.find_filters(args.region, args.specialty)
