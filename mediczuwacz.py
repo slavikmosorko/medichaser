@@ -437,6 +437,13 @@ def display_appointments(appointments):
             console.print("-" * 50)
 
 
+def json_date_serializer(obj):
+    """JSON serializer for objects not serializable by default json code"""
+    if isinstance(obj, datetime.date | datetime.datetime):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Find appointment slots.")
     subparsers = parser.add_subparsers(
@@ -535,7 +542,7 @@ def main():
     Notifier.send_notification(
         [],
         args.notification,
-        f"Mediczuwacz started with command: {args.command} and arguments: {json.dumps(vars(args), indent=2)}",
+        f"Mediczuwacz started with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
     )
 
     while True:
