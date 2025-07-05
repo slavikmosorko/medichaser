@@ -1,6 +1,11 @@
 FROM python:3.13-slim AS base
 
-RUN apt-get -y update && apt-get -y install wget tini git nano vim procps screen
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get -y update && apt-get -y install wget tini git nano vim procps screen
 RUN wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/bin/ttyd
 RUN chmod +x /usr/bin/ttyd
 
@@ -8,7 +13,9 @@ RUN groupadd --gid 1000 selenium && useradd -m --uid 1000 --gid 1000 -s /bin/bas
 
 # Install Chrome and its dependencies
 # Using a specific version of Chrome is often safer for consistency, but 'google-chrome-stable' is fine for general use.
-RUN apt-get update && apt-get install -y \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
     wget \
     gnupg \
     unzip \
@@ -30,10 +37,6 @@ RUN apt-get update && apt-get install -y \
     # Clean up apt caches to reduce image size
     && rm -rf /var/lib/apt/lists/*
 
-EXPOSE 7681
-
-WORKDIR /app
-
 FROM base AS poetry
 RUN --mount=type=cache,target=/root/.cache/pip pip install poetry==2.0.1
 RUN --mount=type=cache,target=/root/.cache/pip poetry self add poetry-plugin-export
@@ -42,18 +45,18 @@ RUN poetry export -o  /requirements.txt --without-hashes --without="dev"
 
 FROM base AS app
 
-COPY --from=poetry /requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY mediczuwacz.py medihunter_notifiers.py ./
-RUN chown -R selenium:selenium /app
-
-ENV PROMPT_COMMAND='history -a'
-ENV HISTFILE=/app/data/.bash_history
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+COPY --from=poetry /requirements.txt /requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r /requirements.txt
 
 USER selenium
 
+ENV PROMPT_COMMAND='history -a'
+ENV HISTFILE=/app/data/.bash_history
+
+WORKDIR /app
+
+COPY mediczuwacz.py medihunter_notifiers.py LICENSE ./
+
+EXPOSE 7681
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["ttyd", "-W", "bash"]

@@ -7,6 +7,9 @@ services:
     env_file:
       - .env
     volumes:
-      - "./data:/app/data"
+      - mediczuwacz_data:/app/data
     ports:
       - 7681:7681
+
+volumes:
+  mediczuwacz_data:
