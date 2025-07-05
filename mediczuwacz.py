@@ -11,6 +11,7 @@ import time
 import requests
 from dotenv import load_dotenv
 from fake_useragent import UserAgent
+from filelock import FileLock
 from requests.adapters import HTTPAdapter
 from rich import print
 from rich.console import Console
@@ -20,7 +21,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium_stealth import stealth
 from urllib3.util import Retry
-from filelock import FileLock
+
 from medihunter_notifiers import (
     gotify_notify,
     pushbullet_notify,

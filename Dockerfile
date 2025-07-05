@@ -50,6 +50,8 @@ RUN chown -R selenium:selenium /app
 
 ENV PROMPT_COMMAND='history -a'
 ENV HISTFILE=/app/data/.bash_history
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 USER selenium
 
