@@ -2,7 +2,7 @@ name: push image to dockerhub on release
 on:
   push:
     branches:
-      - "master"
+      - "main"
     tags:
 
 jobs:
