@@ -2,8 +2,10 @@ name: push image to dockerhub on release
 on:
   push:
     branches:
-      - "main"
-    tags:
+      - main
+  release:
+    types:
+      - created
 
 jobs:
   push_latest_image_to_dockerhub:
