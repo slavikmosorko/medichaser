@@ -33,7 +33,9 @@ jobs:
         id: cache
         with:
           path: cache-mount
-          key: cache-mount-${{ hashFiles('Dockerfile') }}
+          key: cache-mount-${{ runner.os }}-${{ hashFiles('Dockerfile') }}
+          restore-keys: |
+            cache-mount-${{ runner.os }}-
 
       - name: Restore Docker cache mounts
         uses: reproducible-containers/buildkit-cache-dance@v3
