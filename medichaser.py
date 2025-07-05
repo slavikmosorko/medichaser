@@ -1,4 +1,20 @@
-#!/usr/bin/python3
+# GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
+# Copyright: (c) 2018, apqlzm - https://github.com/apqlzm/medihunter
+# Copyright: (c) 2025, SteveSteve24 - https://github.com/SteveSteve24/MediCzuwacz
+# Copyright: (c) 2025, rafsaf - https://github.com/rafsaf/medichaser
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
 import datetime
@@ -38,7 +54,7 @@ DATA_PATH = CURRENT_PATH / "data"
 TOKEN_PATH = DATA_PATH / "medicover_token.json"
 TOKEN_LOCK_PATH = DATA_PATH / "medicover_token.lock"
 LOGIN_LOCK_PATH = DATA_PATH / "medicover_login.lock"
-LOG_FILE = DATA_PATH / "mediczuwacz.log"
+LOG_FILE = DATA_PATH / "medichaser.log"
 
 token_lock = FileLock(TOKEN_LOCK_PATH, timeout=60)
 login_lock = FileLock(LOGIN_LOCK_PATH, timeout=60)
@@ -57,7 +73,7 @@ logging.basicConfig(
     ],
 )
 
-log = logging.getLogger("mediczuwacz")
+log = logging.getLogger("medichaser")
 
 
 # Load environment variables
@@ -646,7 +662,7 @@ def main():
         Notifier.send_notification(
             [],
             args.notification,
-            f"Mediczuwacz started in interval with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
+            f"medichaser started in interval with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
         )
 
     next_run = NextRun(args.interval)
@@ -667,7 +683,7 @@ def main():
             Notifier.send_notification(
                 [],
                 args.notification,
-                f"Mediczuwacz crashed while refreshing token\n: {e}",
+                f"medichaser crashed while refreshing token\n: {e}",
             )
             raise
 

@@ -9,7 +9,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN wget https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/bin/ttyd
 RUN chmod +x /usr/bin/ttyd
 
-RUN groupadd --gid 1000 selenium && useradd -m --uid 1000 --gid 1000 -s /bin/bash selenium
+RUN groupadd --gid 1000 medichaser && useradd -m --uid 1000 --gid 1000 -s /bin/bash medichaser
 
 # Install Chrome and its dependencies
 # Using a specific version of Chrome is often safer for consistency, but 'google-chrome-stable' is fine for general use.
@@ -51,14 +51,14 @@ RUN --mount=type=cache,target=/root/.cache/pip pip install -r /requirements.txt
 # this resolves permissions issues in local env
 RUN mkdir -p /app/data && chmod 777 /app/data
 
-USER selenium
+USER medichaser
 
 ENV PROMPT_COMMAND='history -a'
 ENV HISTFILE=/app/data/.bash_history
 
 WORKDIR /app
 
-COPY mediczuwacz.py medihunter_notifiers.py LICENSE ./
+COPY medichaser.py medihunter_notifiers.py LICENSE ./
 
 EXPOSE 7681
 ENTRYPOINT ["/usr/bin/tini", "--"]

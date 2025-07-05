@@ -1,5 +1,5 @@
 services:
-  mediczuwacz_ttyd:
+  medichaser:
     restart: "no"
     build:
       context: ./
@@ -7,9 +7,9 @@ services:
     env_file:
       - .env
     volumes:
-      - mediczuwacz_data:/app/data
+      - medichaser_data:/app/data
     ports:
       - 7681:7681
 
 volumes:
-  mediczuwacz_data:
+  medichaser_data:
