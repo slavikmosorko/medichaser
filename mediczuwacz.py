@@ -94,6 +94,16 @@ class Authenticator:
         self.session.mount("https://", global_adapter)
         self.headers = {
             "Accept": "application/json",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Accept-Language": "pl",
+            "Connection": "keep-alive",
+            "Origin": "https://online24.medicover.pl",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "Sec-GPC": "1",
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Linux"',
         }
         self.tokenA = None
         self.tokenR = None
@@ -114,13 +124,17 @@ class Authenticator:
                 self.driver,
                 languages=["pl-PL", "pl"],
                 vendor="Google Inc.",
-                platform="Win32",
+                platform="Linux",
                 webgl_vendor="Intel Inc.",
                 renderer="Intel Iris OpenGL Engine",
                 fix_hairline=True,
             )
-            ua = self.driver.execute_cdp_cmd("Browser.getVersion", {})["userAgent"]
-            self.headers["User-Agent"] = ua
+            ua = self.driver.execute_cdp_cmd("Browser.getVersion", {})[
+                "userAgent"
+            ].replace("HeadlessChrome", "Chrome")
+            self.headers["User-Agent"] = ua.replace("HeadlessChrome", "Chrome")
+
+            log.info(f"Using User-Agent: {ua}")
 
         return self.driver
 
@@ -626,6 +640,7 @@ def main():
 
     auth = Authenticator(username, password)
     auth.login()
+    time.sleep(5)
 
     if args.interval:
         Notifier.send_notification(
@@ -644,6 +659,7 @@ def main():
             log.warning(f"Token refresh failed: {e}")
             log.info("Attempting to re-login...")
             auth.login()
+            time.sleep(5)
             log.info("Re-login successful, continuing...")
             continue
         except Exception as e:
