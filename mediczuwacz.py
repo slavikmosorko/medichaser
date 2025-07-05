@@ -104,7 +104,9 @@ class Authenticator:
         if "error" in data:
             print(f"Failed to refresh token: {response.status_code} {response.text}")
             TOKEN_PATH.unlink(missing_ok=True)  # Remove current token file
-            return
+            raise ValueError(
+                f"Failed to refresh token: {response.status_code} {response.text}"
+            )
 
         # manually set expires_at
         expires_in = data.get("expires_in")
@@ -114,10 +116,10 @@ class Authenticator:
         TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
         TOKEN_PATH.write_text(json.dumps(data, indent=4))
 
-        self.headers["Authorization"] = f"Bearer {self.tokenA}"
         self.tokenA = data.get("access_token")
         self.tokenR = data.get("refresh_token")
         self.expires_at = data.get("expires_at")
+        self.headers["Authorization"] = f"Bearer {self.tokenA}"
 
     def use_saved_token(self):
         """Load saved token from file if it exists."""
@@ -530,9 +532,23 @@ def main():
     auth = Authenticator(username, password)
     auth.login()
 
+    Notifier.send_notification(
+        [],
+        args.notification,
+        f"Mediczuwacz started with command: {args.command} and arguments: {json.dumps(vars(args), indent=2)}",
+    )
+
     while True:
         # Authenticate
-        auth.refresh_token()
+        try:
+            auth.refresh_token()
+        except Exception as e:
+            console.print(f"[bold red]Error refreshing token:[/bold red] {e}")
+            Notifier.send_notification(
+                [],
+                args.notification,
+                f"Mediczuwacz crashed while refreshing token\n: {e}",
+            )
 
         finder = AppointmentFinder(auth.session, auth.headers)
 
