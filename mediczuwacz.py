@@ -296,8 +296,10 @@ class Authenticator:
         TOKEN_PATH.write_text(json.dumps(token_json, indent=4))
 
         access_token = token_json.get("access_token")
+        refresh_token = token_json.get("refresh_token")
 
         self.tokenA = access_token
+        self.tokenR = refresh_token
         self.headers["Authorization"] = f"Bearer {self.tokenA}"
 
         driver.quit()
@@ -444,6 +446,28 @@ def json_date_serializer(obj):
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
+class NextRun:
+    def __init__(self, interval_minutes: int | None = 60) -> None:
+        self.next_run = datetime.datetime.now(tz=datetime.UTC)
+        self.interval_minutes = interval_minutes
+
+    def is_time_to_run(self) -> bool:
+        if self.interval_minutes is None:
+            return True
+        now = datetime.datetime.now(tz=datetime.UTC)
+        if now >= self.next_run:
+            self.next_run = now + datetime.timedelta(minutes=self.interval_minutes)
+            return True
+        return False
+
+    def set_next_run(self) -> None:
+        if self.interval_minutes is None:
+            return
+        self.next_run = datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(
+            minutes=self.interval_minutes
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Find appointment slots.")
     subparsers = parser.add_subparsers(
@@ -539,11 +563,14 @@ def main():
     auth = Authenticator(username, password)
     auth.login()
 
-    Notifier.send_notification(
-        [],
-        args.notification,
-        f"Mediczuwacz started with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
-    )
+    if args.interval:
+        Notifier.send_notification(
+            [],
+            args.notification,
+            f"Mediczuwacz started in interval with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
+        )
+
+    next_run = NextRun(args.interval)
 
     while True:
         # Authenticate
@@ -561,6 +588,12 @@ def main():
         finder = AppointmentFinder(auth.session, auth.headers)
 
         if args.command == "find-appointment":
+            if not next_run.is_time_to_run():
+                time.sleep(30)
+                continue
+
+            next_run.set_next_run()
+
             # Find appointments
             appointments = finder.find_appointments(
                 args.region,
@@ -591,10 +624,11 @@ def main():
                     new_appointments, args.notification, args.title
                 )
 
-            if args.interval:
-                # Sleep and repeat
-                time.sleep(args.interval * 60)
-                continue
+            if next_run.interval_minutes is None:
+                console.print(
+                    "[bold green]Exiting after one run due to interval set to None.[/bold green]"
+                )
+                break
 
         elif args.command == "list-filters":
             if args.filter_type in ("doctors", "clinics"):
