@@ -48,6 +48,9 @@ FROM base AS app
 COPY --from=poetry /requirements.txt /requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r /requirements.txt
 
+# this resolves permissions issues in local env
+RUN mkdir -p /app/data && chmod 777 /app/data
+
 USER selenium
 
 ENV PROMPT_COMMAND='history -a'
