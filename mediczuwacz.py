@@ -52,6 +52,12 @@ retry_strategy = Retry(
 global_adapter = HTTPAdapter(max_retries=retry_strategy)
 
 
+class InvalidGrantError(Exception):
+    """Custom exception for invalid_grant error during token refresh."""
+
+    pass
+
+
 class Authenticator:
     def __init__(self, username, password):
         self.username = username
@@ -65,6 +71,34 @@ class Authenticator:
         self.tokenA = None
         self.tokenR = None
         self.expires_at = None
+        self.driver = None
+
+    def _init_driver(self):
+        """Initializes the Selenium WebDriver if it's not already running."""
+        if self.driver is None:
+            options = webdriver.ChromeOptions()
+            options.add_argument("--headless")  # Run in headless mode
+            options.add_argument("--disable-gpu")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument(f"user-data-dir={DATA_PATH / 'chrome_profile'}")
+            self.driver = webdriver.Chrome(options=options)
+            stealth(
+                self.driver,
+                languages=["pl-PL", "pl"],
+                vendor="Google Inc.",
+                platform="Win32",
+                webgl_vendor="Intel Inc.",
+                renderer="Intel Iris OpenGL Engine",
+                fix_hairline=True,
+            )
+        return self.driver
+
+    def _quit_driver(self):
+        """Quits the Selenium WebDriver if it's running."""
+        if self.driver:
+            self.driver.quit()
+            self.driver = None
 
     @token_lock
     def refresh_token(self):
@@ -102,8 +136,15 @@ class Authenticator:
 
         data = response.json()
         if "error" in data:
-            print(f"Failed to refresh token: {response.status_code} {response.text}")
-            TOKEN_PATH.unlink(missing_ok=True)  # Remove current token file
+            if data["error"] == "invalid_grant":
+                print(
+                    "Refresh token is invalid or expired. Deleting token file and re-authenticating."
+                )
+                if TOKEN_PATH.exists():
+                    TOKEN_PATH.unlink()
+                raise InvalidGrantError(
+                    "Invalid grant: refresh token is likely expired or revoked."
+                )
             raise ValueError(
                 f"Failed to refresh token: {response.status_code} {response.text}"
             )
@@ -138,171 +179,166 @@ class Authenticator:
                     self.headers["Authorization"] = f"Bearer {self.tokenA}"
                     print("Using saved access token.")
                     return True
+        return False
+
+    def _get_token_from_storage(self):
+        """Retrieves token from browser's localStorage."""
+        driver = self._init_driver()
+        try:
+            token_data = driver.execute_script(
+                "return localStorage.getItem('oidc.user:https://login-online24.medicover.pl/:web');"
+            )
+            if not token_data:
+                print("Token not found in localStorage.")
+                return False
+
+            token_json = json.loads(token_data)
+            TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+            TOKEN_PATH.write_text(json.dumps(token_json, indent=4))
+
+            self.tokenA = token_json.get("access_token")
+            self.tokenR = token_json.get("refresh_token")
+            self.expires_at = token_json.get("expires_at")
+            self.headers["Authorization"] = f"Bearer {self.tokenA}"
+            print("Successfully retrieved token from localStorage.")
+            return True
+        except Exception as e:
+            print(f"Error retrieving token from localStorage: {e}")
+            print(driver.page_source)
+            return False
 
     def login(self) -> None:
-        if self.use_saved_token():
-            return
+        # if self.use_saved_token():
+        #     return
 
-        print("No valid saved token found, logging in with username and password.")
-        options = webdriver.ChromeOptions()
-        options.add_argument("--headless")  # Run in headless mode
-        options.add_argument("--disable-gpu")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-
-        driver = webdriver.Chrome(options=options)
-        wait = WebDriverWait(driver, 8)
-        stealth(
-            driver,
-            languages=["pl-PL", "pl"],
-            vendor="Google Inc.",
-            platform="Win32",
-            webgl_vendor="Intel Inc.",
-            renderer="Intel Iris OpenGL Engine",
-            fix_hairline=True,
-        )
+        print("No valid saved token found, attempting browser login.")
+        driver = self._init_driver()
+        wait = WebDriverWait(driver, 10)
 
         driver.get("https://login-online24.medicover.pl/")
 
         try:
-            wait.until(EC.url_contains("/Account/Login"))
+            # Wait for a URL that indicates we are past the initial redirect
+            wait.until(
+                EC.any_of(
+                    EC.url_contains("/Account/Login"),
+                    EC.url_contains("/home"),
+                    EC.url_contains("signin-oidc"),
+                )
+            )
         except Exception:
-            print("Could not redirect to login page, printing page source")
+            print("Page did not redirect to a known login or home URL.")
             print(driver.page_source)
-            driver.quit()
+            self._quit_driver()
             sys.exit(1)
 
+        current_url = driver.current_url
+        print(f"Current URL: {current_url}")
+
+        if "/home" in current_url or "signin-oidc" in current_url:
+            print("Already logged in or on a trusted device. Fetching token...")
+            time.sleep(5)  # Wait for local storage to be populated
+            if self._get_token_from_storage():
+                self._quit_driver()
+                return
+            else:
+                print("Failed to get token from storage, proceeding with manual login.")
+
+        # --- Standard Login Flow ---
         try:
             wait.until(EC.presence_of_element_located((By.ID, "cmpwrapper")))
             driver.execute_script(
                 "document.getElementById('cmpwrapper').remove(); document.body.style.overflow = 'auto';"
             )
             print("Attempted to remove consent manager overlay")
-        except Exception as e:
-            print(
-                f"Could not remove consent manager overlay, or it was not present: {e}"
-            )
+        except Exception:
+            print("Could not remove consent manager overlay, or it was not present.")
 
         try:
-            wait.until(EC.presence_of_element_located((By.ID, "loginForm")))
             username_field = wait.until(
                 EC.presence_of_element_located((By.ID, "usernameInput"))
             )
             password_field = wait.until(
                 EC.presence_of_element_located((By.ID, "passwordInput"))
             )
-        except Exception as e:
-            print(f"Error waiting for username or password field: {e}")
-            print(driver.page_source)
-            driver.quit()
-            sys.exit(1)
-
-        username_field.send_keys(self.username)
-        password_field.send_keys(self.password)
-
-        try:
-            try:
-                wait.until(EC.presence_of_element_located((By.ID, "cmpwrapper")))
-
-                driver.execute_script(
-                    "document.getElementById('cmpwrapper').remove(); document.body.style.overflow = 'auto';"
-                )
-                print("Attempted to remove consent manager overlay on MFA page")
-
-            except Exception as e:
-                print(
-                    f"Could not remove consent manager overlay on MFA page, or it was not present: {e}"
-                )
-
+            username_field.send_keys(self.username)
+            password_field.send_keys(self.password)
             login_button = wait.until(
                 EC.element_to_be_clickable((By.ID, "login-button"))
             )
             login_button.click()
-
         except Exception as e:
-            print(f"Error clicking login button: {e}")
-
+            print(f"Error during login form submission: {e}")
             print(driver.page_source)
-            driver.quit()
+            self._quit_driver()
             sys.exit(1)
 
+        # --- MFA or Final Redirect ---
         try:
-            wait.until(EC.url_contains("signin-oidc"))
+            wait.until(
+                EC.any_of(
+                    EC.url_contains("/home"),
+                    EC.presence_of_element_located((By.CLASS_NAME, "mfa-pin-group")),
+                )
+            )
         except Exception:
-            print("no login redirect, now trying MFA flow")
-
-        try:
-            wait.until(EC.presence_of_element_located((By.CLASS_NAME, "mfa-pin-group")))
-
-            print("MFA page loaded")
-        except Exception:
-            print("MFA page did not load, printing page source")
+            print("Did not redirect to MFA or home page.")
             print(driver.page_source)
-            driver.quit()
+            self._quit_driver()
             sys.exit(1)
 
+        if "/home" in driver.current_url:
+            print("Redirected to signin-oidc, MFA likely skipped. Fetching token.")
+            time.sleep(5)  # Wait for local storage to be populated
+            if self._get_token_from_storage():
+                self._quit_driver()
+                return
+            else:
+                print("Failed to get token after signin-oidc redirect.")
+                self._quit_driver()
+                sys.exit(1)
+
+        # --- MFA Flow ---
+        print("MFA page loaded")
         try:
             wait.until(EC.presence_of_element_located((By.ID, "cmpwrapper")))
             driver.execute_script(
                 "document.getElementById('cmpwrapper').remove(); document.body.style.overflow = 'auto';"
             )
             print("Attempted to remove consent manager overlay on MFA page")
-        except Exception as e:
-            print(
-                f"Could not remove consent manager overlay on MFA page, or it was not present: {e}"
-            )
+        except Exception:
+            print("Could not remove consent manager overlay on MFA page.")
 
         mfa_code = input("Please enter the 6-digit MFA code: ")
-
-        if len(mfa_code) != 6:
+        if len(mfa_code) != 6 or not mfa_code.isdigit():
             print("MFA code must be 6 digits.")
-            driver.quit()
+            self._quit_driver()
             sys.exit(1)
 
         mfa_inputs = driver.find_elements(By.CSS_SELECTOR, "div.mfa-pin-group input")
-
         for i in range(6):
             mfa_inputs[i].send_keys(mfa_code[i])
 
-        trusted_device_checkbox = wait.until(
-            EC.element_to_be_clickable((By.ID, "isTrustedDeviceCheckbox"))
-        )
-        trusted_device_checkbox.click()
-
         try:
+            trusted_device_checkbox = wait.until(
+                EC.element_to_be_clickable((By.ID, "isTrustedDeviceCheckbox"))
+            )
+            trusted_device_checkbox.click()
             mfa_button = wait.until(EC.element_to_be_clickable((By.ID, "mfa-button")))
             mfa_button.click()
-
         except Exception as e:
             print(f"Error clicking MFA button: {e}")
             print(driver.page_source)
-            driver.quit()
+            self._quit_driver()
             sys.exit(1)
 
-        time.sleep(10)  # Wait for the page to fully load
-
-        try:
-            token_data = driver.execute_script(
-                "return localStorage.getItem('oidc.user:https://login-online24.medicover.pl/:web');"
-            )
-            token_json = json.loads(token_data)
-        except Exception as e:
-            print(f"Error retrieving token from localStorage: {e}")
-            print(driver.page_source)
-            driver.quit()
+        time.sleep(5)  # Wait for the page to fully load and token to be stored
+        if not self._get_token_from_storage():
+            print("Failed to retrieve token after MFA.")
+            self._quit_driver()
             sys.exit(1)
 
-        TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-        TOKEN_PATH.write_text(json.dumps(token_json, indent=4))
-
-        access_token = token_json.get("access_token")
-        refresh_token = token_json.get("refresh_token")
-
-        self.tokenA = access_token
-        self.tokenR = refresh_token
-        self.headers["Authorization"] = f"Bearer {self.tokenA}"
-
-        driver.quit()
+        self._quit_driver()
 
 
 class AppointmentFinder:
@@ -576,6 +612,12 @@ def main():
         # Authenticate
         try:
             auth.refresh_token()
+        except InvalidGrantError as e:
+            console.print(f"[bold yellow]Token refresh failed:[/bold yellow] {e}")
+            console.print("[bold yellow]Attempting to re-login...[/bold yellow]")
+            auth.login()
+            console.print("[bold green]Re-login successful, continuing...[/bold green]")
+            continue
         except Exception as e:
             console.print(f"[bold red]Error refreshing token:[/bold red] {e}")
             Notifier.send_notification(
