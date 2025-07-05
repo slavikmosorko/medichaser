@@ -549,6 +549,7 @@ def main():
                 args.notification,
                 f"Mediczuwacz crashed while refreshing token\n: {e}",
             )
+            raise
 
         finder = AppointmentFinder(auth.session, auth.headers)
 
