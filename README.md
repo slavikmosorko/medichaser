@@ -8,7 +8,6 @@ MediChaser is a tool for automating Medicover appointment searches. It uses Sele
 The application is designed to be run in a Docker container and includes a `ttyd` web terminal for remote management.
 
 ![medichaser-example.png](./medichaser-example.png)
-![gotify-example.png](./gotify-example.png)
 
 ---
 
