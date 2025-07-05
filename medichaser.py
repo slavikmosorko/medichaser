@@ -41,7 +41,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium_stealth import stealth
 from urllib3.util import Retry
 
-from medihunter_notifiers import (
+from notifications import (
     gotify_notify,
     pushbullet_notify,
     pushover_notify,
@@ -362,6 +362,7 @@ class Authenticator:
         except Exception:
             log.warning("Could not remove consent manager overlay on MFA page.")
 
+        log.info("Please enter the MFA code sent to your device and press Enter:")
         rlist, _, _ = select.select([sys.stdin], [], [], 60)
         if rlist:
             mfa_code = sys.stdin.readline().rstrip("\n")
@@ -616,7 +617,11 @@ def main():
         help="4=Polski, 6=Angielski, 60=Ukraiński",
     )
     find_appointment.add_argument(
-        "-i", "--interval", required=False, type=int, help="Repeat interval in minutes"
+        "-i",
+        "--interval",
+        type=int,
+        default=None,
+        help="Repeat interval in minutes",
     )
 
     list_filters = subparsers.add_parser("list-filters", help="List filters")
@@ -652,44 +657,43 @@ def main():
         )
         sys.exit(1)
 
-    previous_appointments = []
-
     auth = Authenticator(username, password)
     auth.login()
     time.sleep(5)
 
-    if args.interval:
-        Notifier.send_notification(
-            [],
-            args.notification,
-            f"medichaser started in interval with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
-        )
+    finder = AppointmentFinder(auth.session, auth.headers)
 
-    next_run = NextRun(args.interval)
-
-    while True:
-        # Authenticate
-        try:
-            auth.refresh_token()
-        except InvalidGrantError as e:
-            log.warning(f"Token refresh failed: {e}")
-            log.info("Attempting to re-login...")
-            auth.login()
-            time.sleep(5)
-            log.info("Re-login successful, continuing...")
-            continue
-        except Exception as e:
-            log.error(f"Error refreshing token: {e}")
+    if args.command == "find-appointment":
+        if args.interval is not None:
             Notifier.send_notification(
                 [],
                 args.notification,
-                f"medichaser crashed while refreshing token\n: {e}",
+                f"medichaser started in interval with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
             )
-            raise
 
-        finder = AppointmentFinder(auth.session, auth.headers)
+        next_run = NextRun(args.interval)
+        previous_appointments = []
 
-        if args.command == "find-appointment":
+        while True:
+            # Authenticate
+            try:
+                auth.refresh_token()
+            except InvalidGrantError as e:
+                log.warning(f"Token refresh failed: {e}")
+                log.info("Attempting to re-login...")
+                auth.login()
+                time.sleep(5)
+                log.info("Re-login successful, continuing...")
+                continue
+            except Exception as e:
+                log.error(f"Error refreshing token: {e}")
+                Notifier.send_notification(
+                    [],
+                    args.notification,
+                    f"medichaser crashed while refreshing token\n: {e}",
+                )
+                raise
+
             if not next_run.is_time_to_run():
                 time.sleep(30)
                 continue
@@ -732,16 +736,31 @@ def main():
 
             continue
 
-        elif args.command == "list-filters":
-            if args.filter_type in ("doctors", "clinics"):
-                filters = finder.find_filters(args.region, args.specialty)
-            else:
-                filters = finder.find_filters()
+    elif args.command == "list-filters":
+        # Authenticate
+        try:
+            auth.refresh_token()
+        except InvalidGrantError as e:
+            log.warning(f"Token refresh failed: {e}")
+            log.info("Attempting to re-login...")
+            auth.login()
+            time.sleep(5)
+            log.info("Re-login successful, continuing...")
+        except Exception as e:
+            log.error(f"Error refreshing token: {e}")
+            Notifier.send_notification(
+                [],
+                args.notification,
+                f"medichaser crashed while refreshing token\n: {e}",
+            )
+            raise
+        if args.filter_type in ("doctors", "clinics"):
+            filters = finder.find_filters(args.region, args.specialty)
+        else:
+            filters = finder.find_filters()
 
-            for r in filters[args.filter_type]:
-                log.info(f"{r['id']} - {r['value']}")
-
-        break
+        for r in filters[args.filter_type]:
+            log.info(f"{r['id']} - {r['value']}")
 
 
 if __name__ == "__main__":

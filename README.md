@@ -1,128 +1,174 @@
-# Why forked
+# MediChaser
 
-- added refresh token
-- support to mfa
-- run in web terminal - https://github.com/tsl0922/ttyd - this allows to remotely control this if hosted somewhere.
+[![Docker Pulls](https://img.shields.io/docker/pulls/rafsaf/medichaser.svg)](https://hub.docker.com/r/rafsaf/medichaser)
+[![Latest release](https://img.shields.io/github/v/release/rafsaf/medichaser)](https://github.com/rafsaf/medichaser/releases/latest)
 
-# Medichaser
+MediChaser is a tool for automating Medicover appointment searches. It uses Selenium to interact with the Medicover website, handling login and MFA, and sends notifications when appointments are found.
 
-Easily track when your Medicover doctor has open appointments.
+The application is designed to be run in a Docker container and includes a `ttyd` web terminal for remote management.
 
-- Automatically logs in to your Medicover account
-- Checks for new available visits with selected doctors, clinics, or specialties
-- Sends instant notifications (Gotify, Telegram, and more)
-- Simple to set up and automate using Docker
+![medichaser-example.png](./medichaser-example.png)
+![gotify-example.png](./gotify-example.png)
 
 ---
 
-## Configuration (One-Time Setup)
+## Features
 
-1. Copy the example environment file:
-   ```bash
-   cp .env.example .env
-   ```
-2. Fill in the `.env` file with your credentials.
-3. Run following command to run docker compose:
-   ```bash
-   docker compose up -d
-   ```
-4. Visit http://localhost:7681 - integrated web terminal
+- Search for appointments by region, specialty, clinic, doctor, date range, and language at a configurable interval.
+- Handles MFA by using a persistent Selenium browser profile.
+- Sends notifications via Gotify, Telegram, Pushbullet, Pushover, and XMPP.
+- Remote management through an integrated `ttyd` web terminal.
+- Persistent data storage for sessions, tokens, and logs.
+
+---
+
+## How It Works
+
+MediChaser uses Selenium Stealth to control a headless Chrome browser, automating user interactions on the Medicover website. This makes it capable of handling interactive login flows, including MFA.
+
+By storing the browser profile in a persistent Docker volume, subsequent logins are often treated as trusted, reducing the need for repeated MFA challenges. The included `ttyd` service provides command-line access to the container via a web browser.
+
+---
+
+## Setup
+
+**Prerequisites**: Docker and Docker Compose.
+
+1. **Clone the repository:**
+
+    ```bash
+    git clone https://github.com/rafsaf/medichaser.git
+    cd medichaser
+    ```
+
+2. **Create `.env` file:**
+
+    ```bash
+    cp .env.example .env
+    ```
+
+3. **Configure credentials:**
+
+    Edit the `.env` file with your Medicover username and password.
+
+    ```bash
+    MEDICOVER_USER="your_username"
+    MEDICOVER_PASS="your_password"
+    ```
+
+    Configure notifiers in this file as well (see below).
+
+4. **Run with Docker Compose:**
+
+    ```bash
+    docker compose up -d
+    ```
+
+5. **Access the web terminal:**
+
+    Navigate to `http://localhost:7681`.
 
 ---
 
 ## Usage
 
-### Run with Parameters
+All commands are run from the web terminal.
 
-#### Example 1: Search for an Appointment
+### Listing Filters
 
-For a pediatrician (`Pediatra`) in Warsaw:
+- **List regions:**
 
-```bash
-python medichaser.py find-appointment -r 204 -s 132 -f "2024-12-11"
-```
+    ```bash
+    python medichaser.py list-filters regions
+    ```
 
-#### Example 2: Search and Send Notifications
+- **List specialties:**
 
-To search and send notifications via Gotify:
+    ```bash
+    python medichaser.py list-filters specialties
+    ```
 
-```bash
-python medichaser.py find-appointment -r 204 -s 132 -f "2024-12-11" -n gotify -t "Pediatra"
-```
+- **List clinics** (example for Warsaw, Pediatrics):
 
-#### Example 3: Search for an Appointment in particular Clinic (Łukiska - 49284)
+    ```bash
+    python medichaser.py list-filters clinics -r 204 -s 132
+    ```
 
-To search and send notifications via Gotify:
+- **List doctors** (example for Warsaw, Pediatrics):
 
-```bash
-python medichaser.py find-appointment -r 204 -s 132 -f "2024-12-11" -c 49284 -n gotify -t "Pediatra"
-```
+    ```bash
+    python medichaser.py list-filters doctors -r 204 -s 132
+    ```
 
-#### Example 4: Search for a Specific Doctor and set End date
+### Finding Appointments
 
-Use `-d` param:
+- **Basic search** (Pediatrician in Warsaw):
 
-```bash
-python medichaser.py find-appointment -r 204 -s 132 -d 394 -f "2024-12-16" -e "2024-12-19"
-```
+    ```bash
+    python medichaser.py find-appointment -r 204 -s 132
+    ```
 
-#### Example 5: Search for a Dental Hygienist who speaks ukrainian
+- **Search with a date range**:
 
-Use `-l` param:
+    ```bash
+    python medichaser.py find-appointment -r 204 -s 132 -d 394 -f "2025-12-16" -e "2025-12-19"
+    ```
 
-```bash
-python medichaser.py find-appointment -r 204 -s 112 -l 60
-```
+- **Search in one clinic**:
 
-#### Example 6: start once and check for new Appointments every 10 minutes
+    ```bash
+    python medichaser.py find-appointment -r 204 -s 132 -c 49284
+    ```
 
-```bash
-python medichaser.py find-appointment -r 204 -s 112 -i 10
-```
+- **Search by language** (Ukrainian-speaking dental hygienist):
+
+    ```bash
+    python medichaser.py find-appointment -r 204 -s 112 -l 60
+    ```
+
+- **Continuous monitoring and notifications**:
+
+    ```bash
+    python medichaser.py find-appointment -r 204 -s 132 -i 15 -n gotify -t "Pediatra Warszawa"
+    ```
 
 ---
 
-## How to Know IDs?
+## Notifications Setup
 
-In commands, you use different IDs (e.g., `204` for Warsaw). How do you find other values?
+Add the required environment variables for your preferred service to the `.env` file.
 
-Run the following commands:
+### Gotify
 
-- To list available regions:
+- `GOTIFY_HOST`: Your server URL (e.g., `http://gotify.example.com:8080`).
+- `GOTIFY_TOKEN`: Your app token.
+- `GOTIFY_PRIORITY` (Optional): Default is `5`.
 
-  ```bash
-  python medichaser.py list-filters regions
-  ```
+### Telegram
 
-- To list available specialties:
+- `NOTIFIERS_TELEGRAM_TOKEN`: Your bot token.
+- `NOTIFIERS_TELEGRAM_CHAT_ID`: The chat ID to send messages to.
 
-  ```bash
-  python medichaser.py list-filters specialties
-  ```
+### Pushover
 
-- To list clinics for a specific region and specialty:
+- `NOTIFIERS_PUSHOVER_USER`: Your user key.
+- `NOTIFIERS_PUSHOVER_TOKEN`: Your application API token.
 
-  ```bash
-  python medichaser.py list-filters clinics -r 204 -s 132
-  ```
+### Pushbullet
 
-- To list doctors for a specific region and specialty:
-  ```bash
-  python medichaser.py list-filters doctors -r 204 -s 132
-  ```
+- `NOTIFIERS_PUSHBULLET_TOKEN`: Your access token.
 
+### XMPP (Jabber)
 
-
-
-
-
-
+- `NOTIFIERS_XMPP_JID`: Your full JID (`user@example.com`).
+- `NOTIFIERS_XMPP_PASSWORD`: Your password.
+- `NOTIFIERS_XMPP_RECEIVER`: The recipient's JID.
 
 ---
 
 ## Acknowledgements
 
-Special thanks to the following projects for their inspiration:
+This project stands on the shoulders of giants. Big thanks to the original authors and inspirations:
 
 - [apqlzm/medihunter](https://github.com/apqlzm/medihunter)
 - [SteveSteve24/MediCzuwacz](https://github.com/SteveSteve24/MediCzuwacz)
