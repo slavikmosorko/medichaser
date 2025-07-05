@@ -3,18 +3,21 @@
 import argparse
 import datetime
 import json
+import logging
 import os
 import pathlib
+import select
 import sys
 import time
+from logging.handlers import RotatingFileHandler
 
 import requests
+import tenacity
 from dotenv import load_dotenv
-from fake_useragent import UserAgent
 from filelock import FileLock
 from requests.adapters import HTTPAdapter
-from rich import print
 from rich.console import Console
+from rich.logging import RichHandler
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -34,9 +37,28 @@ CURRENT_PATH = pathlib.Path(__file__).parent.resolve()
 DATA_PATH = CURRENT_PATH / "data"
 TOKEN_PATH = DATA_PATH / "medicover_token.json"
 TOKEN_LOCK_PATH = DATA_PATH / "medicover_token.lock"
+LOGIN_LOCK_PATH = DATA_PATH / "medicover_login.lock"
+LOG_FILE = DATA_PATH / "mediczuwacz.log"
 
-token_lock = FileLock(TOKEN_LOCK_PATH, timeout=10)
+token_lock = FileLock(TOKEN_LOCK_PATH, timeout=60)
+login_lock = FileLock(LOGIN_LOCK_PATH, timeout=60)
 console = Console()
+
+# Setup logging
+
+logging.basicConfig(
+    level="INFO",
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        RotatingFileHandler(
+            LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5
+        ),  # 10 MB
+        RichHandler(rich_tracebacks=True, console=console),
+    ],
+)
+
+log = logging.getLogger("mediczuwacz")
+
 
 # Load environment variables
 load_dotenv()
@@ -58,6 +80,12 @@ class InvalidGrantError(Exception):
     pass
 
 
+class MFAError(Exception):
+    """Custom exception for MFA-related errors."""
+
+    pass
+
+
 class Authenticator:
     def __init__(self, username, password):
         self.username = username
@@ -65,7 +93,6 @@ class Authenticator:
         self.session = requests.Session()
         self.session.mount("https://", global_adapter)
         self.headers = {
-            "User-Agent": UserAgent().random,
             "Accept": "application/json",
         }
         self.tokenA = None
@@ -92,6 +119,9 @@ class Authenticator:
                 renderer="Intel Iris OpenGL Engine",
                 fix_hairline=True,
             )
+            ua = self.driver.execute_cdp_cmd("Browser.getVersion", {})["userAgent"]
+            self.headers["User-Agent"] = ua
+
         return self.driver
 
     def _quit_driver(self):
@@ -109,14 +139,14 @@ class Authenticator:
             and self.expires_at
             and self.expires_at > int(time.time())
         ):
-            print("access token is still valid, no need to refresh.")
+            log.info("access token is still valid, no need to refresh.")
             return
 
         if not self.tokenR:
-            print("No refresh token available, cannot refresh access token.")
+            log.warning("No refresh token available, cannot refresh access token.")
             return
 
-        print("Refreshing access token...")
+        log.info("Refreshing access token...")
         refresh_token_data = {
             "grant_type": "refresh_token",
             "refresh_token": self.tokenR,
@@ -137,7 +167,7 @@ class Authenticator:
         data = response.json()
         if "error" in data:
             if data["error"] == "invalid_grant":
-                print(
+                log.error(
                     "Refresh token is invalid or expired. Deleting token file and re-authenticating."
                 )
                 if TOKEN_PATH.exists():
@@ -162,25 +192,6 @@ class Authenticator:
         self.expires_at = data.get("expires_at")
         self.headers["Authorization"] = f"Bearer {self.tokenA}"
 
-    def use_saved_token(self):
-        """Load saved token from file if it exists."""
-        if TOKEN_PATH.exists():
-            with open(TOKEN_PATH) as f:
-                token_data = json.load(f)
-                self.tokenA = token_data.get("access_token")
-                self.tokenR = token_data.get("refresh_token")
-                self.expires_at = token_data.get("expires_at")
-                self.expires_in = token_data.get("expires_in")
-                if self.expires_at and self.expires_at < int(time.time()):
-                    print("access token expired, refreshing...")
-                    self.refresh_token()
-
-                if self.tokenA and self.tokenR:
-                    self.headers["Authorization"] = f"Bearer {self.tokenA}"
-                    print("Using saved access token.")
-                    return True
-        return False
-
     def _get_token_from_storage(self):
         """Retrieves token from browser's localStorage."""
         driver = self._init_driver()
@@ -189,7 +200,7 @@ class Authenticator:
                 "return localStorage.getItem('oidc.user:https://login-online24.medicover.pl/:web');"
             )
             if not token_data:
-                print("Token not found in localStorage.")
+                log.warning("Token not found in localStorage.")
                 return False
 
             token_json = json.loads(token_data)
@@ -200,20 +211,24 @@ class Authenticator:
             self.tokenR = token_json.get("refresh_token")
             self.expires_at = token_json.get("expires_at")
             self.headers["Authorization"] = f"Bearer {self.tokenA}"
-            print("Successfully retrieved token from localStorage.")
+            log.info("Successfully retrieved token from localStorage.")
             return True
         except Exception as e:
-            print(f"Error retrieving token from localStorage: {e}")
-            print(driver.page_source)
+            log.error(f"Error retrieving token from localStorage: {e}")
+            log.error(driver.page_source)
             return False
 
+    @login_lock
+    @tenacity.retry(
+        stop=tenacity.stop_after_attempt(2),
+        wait=tenacity.wait_fixed(10),
+        retry=tenacity.retry_if_not_exception_type(MFAError),
+        reraise=True,
+    )
     def login(self) -> None:
-        # if self.use_saved_token():
-        #     return
-
-        print("No valid saved token found, attempting browser login.")
+        log.info("No valid saved token found, attempting browser login.")
         driver = self._init_driver()
-        wait = WebDriverWait(driver, 10)
+        wait = WebDriverWait(driver, 8)
 
         driver.get("https://login-online24.medicover.pl/")
 
@@ -227,22 +242,28 @@ class Authenticator:
                 )
             )
         except Exception:
-            print("Page did not redirect to a known login or home URL.")
-            print(driver.page_source)
+            log.error("Page did not redirect to a known login or home URL.")
+            log.error(driver.page_source)
             self._quit_driver()
-            sys.exit(1)
+            raise
+
+        time.sleep(2)  # Allow time for the page to load
 
         current_url = driver.current_url
-        print(f"Current URL: {current_url}")
+        log.debug(f"Current URL: {current_url}")
 
-        if "/home" in current_url or "signin-oidc" in current_url:
-            print("Already logged in or on a trusted device. Fetching token...")
+        if "/Account/Login?" in current_url:
+            log.info("On login page, proceeding with login.")
+        else:
+            log.info("Already logged in or on a trusted device. Fetching token...")
             time.sleep(5)  # Wait for local storage to be populated
             if self._get_token_from_storage():
                 self._quit_driver()
                 return
             else:
-                print("Failed to get token from storage, proceeding with manual login.")
+                log.warning(
+                    "Failed to get token from storage, proceeding with manual login."
+                )
 
         # --- Standard Login Flow ---
         try:
@@ -250,9 +271,11 @@ class Authenticator:
             driver.execute_script(
                 "document.getElementById('cmpwrapper').remove(); document.body.style.overflow = 'auto';"
             )
-            print("Attempted to remove consent manager overlay")
+            log.info("Attempted to remove consent manager overlay")
         except Exception:
-            print("Could not remove consent manager overlay, or it was not present.")
+            log.warning(
+                "Could not remove consent manager overlay, or it was not present."
+            )
 
         try:
             username_field = wait.until(
@@ -268,10 +291,10 @@ class Authenticator:
             )
             login_button.click()
         except Exception as e:
-            print(f"Error during login form submission: {e}")
-            print(driver.page_source)
+            log.error(f"Error during login form submission: {e}")
+            log.error(driver.page_source)
             self._quit_driver()
-            sys.exit(1)
+            raise
 
         # --- MFA or Final Redirect ---
         try:
@@ -282,38 +305,45 @@ class Authenticator:
                 )
             )
         except Exception:
-            print("Did not redirect to MFA or home page.")
-            print(driver.page_source)
+            log.error("Did not redirect to MFA or home page.")
+            log.error(driver.page_source)
             self._quit_driver()
-            sys.exit(1)
+            raise
 
         if "/home" in driver.current_url:
-            print("Redirected to signin-oidc, MFA likely skipped. Fetching token.")
+            log.info("Redirected to signin-oidc, MFA likely skipped. Fetching token.")
             time.sleep(5)  # Wait for local storage to be populated
             if self._get_token_from_storage():
                 self._quit_driver()
                 return
             else:
-                print("Failed to get token after signin-oidc redirect.")
+                log.error("Failed to get token after signin-oidc redirect.")
                 self._quit_driver()
-                sys.exit(1)
+                raise ValueError("Failed to retrieve token after signin-oidc redirect.")
 
         # --- MFA Flow ---
-        print("MFA page loaded")
+        log.info("MFA page loaded")
         try:
             wait.until(EC.presence_of_element_located((By.ID, "cmpwrapper")))
             driver.execute_script(
                 "document.getElementById('cmpwrapper').remove(); document.body.style.overflow = 'auto';"
             )
-            print("Attempted to remove consent manager overlay on MFA page")
+            log.info("Attempted to remove consent manager overlay on MFA page")
         except Exception:
-            print("Could not remove consent manager overlay on MFA page.")
+            log.warning("Could not remove consent manager overlay on MFA page.")
 
-        mfa_code = input("Please enter the 6-digit MFA code: ")
-        if len(mfa_code) != 6 or not mfa_code.isdigit():
-            print("MFA code must be 6 digits.")
+        rlist, _, _ = select.select([sys.stdin], [], [], 60)
+        if rlist:
+            mfa_code = sys.stdin.readline().rstrip("\n")
+        else:
+            log.error("Error getting MFA code input: Timeout expired.")
             self._quit_driver()
-            sys.exit(1)
+            raise MFAError("Timeout! Failed to get MFA code input.")
+
+        if len(mfa_code) != 6 or not mfa_code.isdigit():
+            log.error("MFA code must be 6 digits.")
+            self._quit_driver()
+            raise MFAError("Invalid MFA code format.")
 
         mfa_inputs = driver.find_elements(By.CSS_SELECTOR, "div.mfa-pin-group input")
         for i in range(6):
@@ -327,16 +357,16 @@ class Authenticator:
             mfa_button = wait.until(EC.element_to_be_clickable((By.ID, "mfa-button")))
             mfa_button.click()
         except Exception as e:
-            print(f"Error clicking MFA button: {e}")
-            print(driver.page_source)
+            log.error(f"Error clicking MFA button: {e}")
+            log.error(driver.page_source)
             self._quit_driver()
-            sys.exit(1)
+            raise MFAError("Failed to submit MFA code.")
 
         time.sleep(5)  # Wait for the page to fully load and token to be stored
         if not self._get_token_from_storage():
-            print("Failed to retrieve token after MFA.")
+            log.error("Failed to retrieve token after MFA.")
             self._quit_driver()
-            sys.exit(1)
+            raise MFAError("Failed to retrieve token after MFA.")
 
         self._quit_driver()
 
@@ -351,9 +381,7 @@ class AppointmentFinder:
         if response.status_code == 200:
             return response.json()
         else:
-            console.print(
-                f"[bold red]Error {response.status_code}[/bold red]: {response.text}"
-            )
+            log.error(f"Error {response.status_code}: {response.text}")
             return {}
 
     def find_appointments(
@@ -449,13 +477,13 @@ class Notifier:
 
 
 def display_appointments(appointments):
-    console.print()
-    console.print("-" * 50)
+    log.info("")
+    log.info("-" * 50)
     if not appointments:
-        console.print("No new appointments found.")
+        log.info("No new appointments found.")
     else:
-        console.print("New appointments found:")
-        console.print("-" * 50)
+        log.info("New appointments found:")
+        log.info("-" * 50)
         for appointment in appointments:
             date = appointment.get("appointmentDate", "N/A")
             clinic = appointment.get("clinic", {}).get("name", "N/A")
@@ -467,12 +495,12 @@ def display_appointments(appointments):
                 if doctor_languages
                 else "N/A"
             )
-            console.print(f"Date: {date}")
-            console.print(f"  Clinic: {clinic}")
-            console.print(f"  Doctor: {doctor}")
-            console.print(f"  Specialty: {specialty}")
-            console.print(f"  Languages: {languages}")
-            console.print("-" * 50)
+            log.info(f"Date: {date}")
+            log.info(f"  Clinic: {clinic}")
+            log.info(f"  Doctor: {doctor}")
+            log.info(f"  Specialty: {specialty}")
+            log.info(f"  Languages: {languages}")
+            log.info("-" * 50)
 
 
 def json_date_serializer(obj):
@@ -589,8 +617,8 @@ def main():
     password = os.environ.get("MEDICOVER_PASS")
 
     if not username or not password:
-        console.print(
-            "[bold red]Error:[/bold red] MEDICOVER_USER and MEDICOVER_PASS environment variables must be set."
+        log.error(
+            "MEDICOVER_USER and MEDICOVER_PASS environment variables must be set."
         )
         sys.exit(1)
 
@@ -613,13 +641,13 @@ def main():
         try:
             auth.refresh_token()
         except InvalidGrantError as e:
-            console.print(f"[bold yellow]Token refresh failed:[/bold yellow] {e}")
-            console.print("[bold yellow]Attempting to re-login...[/bold yellow]")
+            log.warning(f"Token refresh failed: {e}")
+            log.info("Attempting to re-login...")
             auth.login()
-            console.print("[bold green]Re-login successful, continuing...[/bold green]")
+            log.info("Re-login successful, continuing...")
             continue
         except Exception as e:
-            console.print(f"[bold red]Error refreshing token:[/bold red] {e}")
+            log.error(f"Error refreshing token: {e}")
             Notifier.send_notification(
                 [],
                 args.notification,
@@ -667,9 +695,7 @@ def main():
                 )
 
             if next_run.interval_minutes is None:
-                console.print(
-                    "[bold green]Exiting after one run due to interval set to None.[/bold green]"
-                )
+                log.info("Exiting after one run due to interval set to None.")
                 break
 
             continue
@@ -681,7 +707,7 @@ def main():
                 filters = finder.find_filters()
 
             for r in filters[args.filter_type]:
-                print(f"{r['id']} - {r['value']}")
+                log.info(f"{r['id']} - {r['value']}")
 
         break
 
