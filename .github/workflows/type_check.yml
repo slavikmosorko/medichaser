@@ -2,9 +2,12 @@ name: type-check
 on:
   push:
     branches:
-      - "**"
+      - "main"
     tags-ignore:
       - "*.*"
+  pull_request:
+    branches:
+      - main
 
 permissions:
   actions: write
