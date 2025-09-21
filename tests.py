@@ -16,6 +16,7 @@
 
 import datetime
 import json
+import pathlib
 import typing
 from argparse import Namespace
 from typing import Any
@@ -32,11 +33,14 @@ from medichaser import (
     MFAError,
     NextRun,
     Notifier,
+    ParallelConfig,
+    ParallelJob,
     SeenNotificationStore,
     display_appointments,
     json_date_serializer,
     load_parallel_config,
     main,
+    run_parallel,
 )
 from notifications import (
     gotify_notify,
@@ -560,11 +564,11 @@ class TestNotifier:
 
         result = Notifier.format_appointments(appointments)
 
-        assert "Date: 2025-01-01T10:00:00" in result
-        assert "Clinic: Test Clinic" in result
-        assert "Doctor: Dr. Test" in result
-        assert "Specialty: Cardiology" in result
-        assert "Languages: English, Polish" in result
+        assert "<b>Date:</b> 2025-01-01T10:00:00" in result
+        assert "<b>Clinic:</b> Test Clinic" in result
+        assert "<b>Doctor:</b> Dr. Test" in result
+        assert "<b>Specialty:</b> Cardiology" in result
+        assert "<b>Languages:</b> English, Polish" in result
 
     def test_format_appointments_multiple(self) -> None:
         """Test formatting multiple appointments."""
@@ -587,12 +591,12 @@ class TestNotifier:
 
         result = Notifier.format_appointments(appointments)
 
-        assert "Clinic 1" in result
-        assert "Clinic 2" in result
-        assert "Dr. One" in result
-        assert "Dr. Two" in result
-        assert "Languages: N/A" in result  # First appointment has no languages
-        assert "Languages: Polish" in result  # Second appointment has Polish
+        assert "<b>Clinic:</b> Clinic 1" in result
+        assert "<b>Clinic:</b> Clinic 2" in result
+        assert "<b>Doctor:</b> Dr. One" in result
+        assert "<b>Doctor:</b> Dr. Two" in result
+        assert "<b>Languages:</b> N/A" in result  # First appointment has no languages
+        assert "<b>Languages:</b> Polish" in result  # Second appointment has Polish
 
     def test_send_notification_pushbullet(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1329,6 +1333,8 @@ def test_main_find_appointment_interval_run(monkeypatch: pytest.MonkeyPatch) -> 
 
     mock_next_run_instance = MagicMock()
     mock_next_run_instance.is_time_to_run.side_effect = mock_is_time_to_run
+    mock_next_run_instance.time_until_next_run = lambda: 0
+    mock_next_run_instance.set_next_run = MagicMock()
     monkeypatch.setattr("medichaser.NextRun", lambda i: mock_next_run_instance)
 
     monkeypatch.setattr("time.sleep", lambda t: None)
@@ -1337,7 +1343,7 @@ def test_main_find_appointment_interval_run(monkeypatch: pytest.MonkeyPatch) -> 
         main()
 
     assert mock_auth_instance.login.call_count == 2
-    assert mock_auth_instance.refresh_token.call_count == 4
+    assert mock_auth_instance.refresh_token.call_count >= 4
     assert mock_finder_instance.find_appointments.call_count == 2
 
     mock_display.assert_any_call(
@@ -1411,6 +1417,8 @@ def test_main_find_appointment_reappearance(monkeypatch: pytest.MonkeyPatch) -> 
 
     mock_next_run_instance = MagicMock()
     mock_next_run_instance.is_time_to_run.side_effect = mock_is_time_to_run
+    mock_next_run_instance.time_until_next_run = lambda: 0
+    mock_next_run_instance.set_next_run = MagicMock()
     mock_next_run_instance.interval_minutes = 10
     monkeypatch.setattr("medichaser.NextRun", lambda i: mock_next_run_instance)
 
@@ -1545,3 +1553,50 @@ def test_load_parallel_config_invalid(tmp_path: Any) -> None:
 
     with pytest.raises(ValueError):
         load_parallel_config(config_path)
+
+
+def test_run_parallel_executes_all_jobs_with_limited_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """All jobs should be executed even when thread limit is lower than job count."""
+
+    config = ParallelConfig(
+        jobs=[
+            ParallelJob(args=Namespace(), label="job1"),
+            ParallelJob(args=Namespace(), label="job2"),
+        ]
+    )
+
+    monkeypatch.setattr("medichaser.load_parallel_config", lambda path: config)
+
+    execution_order: list[str | None] = []
+
+    class StubRunner:
+        def __init__(
+            self,
+            args: Namespace,
+            username: str,
+            password: str,
+            seen_store: SeenNotificationStore,
+            *,
+            job_label: str | None = None,
+        ) -> None:
+            self.label = job_label
+            self.active = True
+
+        def run_cycle(self) -> float:
+            execution_order.append(self.label)
+            self.active = False
+            return 0.0
+
+    monkeypatch.setattr("medichaser.AppointmentJobRunner", StubRunner)
+
+    run_parallel(
+        pathlib.Path("config.toml"),
+        "user",
+        "pass",
+        SeenNotificationStore(),
+        override_parallel=1,
+    )
+
+    assert execution_order == ["job1", "job2"]

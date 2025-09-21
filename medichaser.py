@@ -24,6 +24,7 @@ import base64
 import concurrent.futures
 import datetime
 import hashlib
+import heapq
 import json
 import logging
 import os
@@ -38,6 +39,7 @@ import time
 import tomllib
 import uuid
 from dataclasses import dataclass
+from itertools import count
 from logging.handlers import RotatingFileHandler
 from typing import Any, cast
 from urllib.parse import parse_qs, quote_plus, unquote_plus, urlparse
@@ -1147,6 +1149,160 @@ class NextRun:
             minutes=self.interval_minutes
         )
 
+    def time_until_next_run(self) -> float:
+        if self.interval_minutes is None:
+            return 0.0
+        now = datetime.datetime.now(tz=datetime.UTC)
+        if now >= self.next_run:
+            return 0.0
+        delta = self.next_run - now
+        return max(delta.total_seconds(), 0.0)
+
+
+class AppointmentJobRunner:
+    """Execute appointment search cycles while tracking job state."""
+
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        username: str,
+        password: str,
+        seen_store: SeenNotificationStore,
+        *,
+        job_label: str | None = None,
+    ) -> None:
+        self.args = args
+        self.username = username
+        self.password = password
+        self.seen_store = seen_store
+        self.job_log = create_job_logger(job_label)
+        self.next_run = NextRun(args.interval)
+        self.previous_appointments: list[dict[str, Any]] = []
+        self.active = True
+        self._auth: Authenticator | None = None
+        self._finder: AppointmentFinder | None = None
+        self._initialized = False
+
+    def _ensure_initialized(self) -> None:
+        if self._initialized:
+            return
+
+        self._auth = Authenticator(self.username, self.password)
+        try:
+            self._auth.login()
+        except MFAError:
+            self.job_log.error("Failed MFA, please try again.")
+            DEVICE_ID_PATH.unlink(missing_ok=True)
+            raise
+
+        time.sleep(5)
+        self._finder = AppointmentFinder(self._auth.session, self._auth.headers)
+        self._initialized = True
+
+    def run_cycle(self) -> float:
+        """Run a single polling cycle for the job and return delay until next run."""
+
+        self._ensure_initialized()
+        assert self._auth is not None
+        assert self._finder is not None
+
+        try:
+            try:
+                self._auth.refresh_token()
+            except InvalidGrantError as e:
+                self.job_log.warning(f"Token refresh failed: {e}")
+                self.job_log.info("Attempting to re-login...")
+                self._auth.login()
+                time.sleep(5)
+                self.job_log.info("Re-login successful, continuing...")
+                return 0.0
+
+            wait_for_next: float | None = None
+            time_until = getattr(self.next_run, "time_until_next_run", None)
+            if callable(time_until):
+                try:
+                    wait_for_next = float(time_until())
+                except (TypeError, ValueError):
+                    wait_for_next = None
+
+            should_run = True
+            if hasattr(self.next_run, "is_time_to_run"):
+                should_run = bool(self.next_run.is_time_to_run())
+
+            if not should_run:
+                if wait_for_next is not None:
+                    return min(wait_for_next, 30.0)
+                return 30.0
+
+            if wait_for_next is not None and wait_for_next > 0:
+                return min(wait_for_next, 30.0)
+
+            self.next_run.set_next_run()
+
+            try:
+                appointments = self._finder.find_appointments(
+                    self.args.region,
+                    self.args.specialty,
+                    self.args.clinic,
+                    self.args.date,
+                    self.args.enddate,
+                    self.args.language,
+                    self.args.doctor,
+                )
+            except ExpiredToken as e:
+                self.job_log.warning("Expired token error: %s", e)
+                return 0.0
+
+            if self.previous_appointments:
+                new_appointments = [
+                    appointment
+                    for appointment in appointments
+                    if appointment not in self.previous_appointments
+                ]
+            else:
+                new_appointments = appointments
+
+            self.previous_appointments = appointments
+
+            display_appointments(new_appointments, logger=self.job_log)
+
+            fresh_appointments = self.seen_store.filter_new(new_appointments)
+            if fresh_appointments:
+                Notifier.send_notification(
+                    fresh_appointments, self.args.notification, self.args.title
+                )
+
+            if self.next_run.interval_minutes is None:
+                self.job_log.info("Exiting after one run due to interval set to None.")
+                self.active = False
+                return 0.0
+
+            next_wait: float = 30.0
+            if callable(time_until):
+                try:
+                    next_wait = float(time_until())
+                except (TypeError, ValueError):
+                    next_wait = 30.0
+
+            return min(next_wait, 30.0)
+        except Exception as e:
+            self.job_log.error(f"Error in main loop: {e}")
+            Notifier.send_notification(
+                [],
+                self.args.notification,
+                f"medichaser crashed during run:\n {e}",
+            )
+            raise
+
+    def run_forever(self) -> None:
+        """Continuously run the job until it finishes or fails."""
+
+        while self.active:
+            wait_time = self.run_cycle()
+            if not self.active:
+                break
+            if wait_time > 0:
+                time.sleep(wait_time)
 
 def run_find_appointment(
     args: argparse.Namespace,
@@ -1156,84 +1312,13 @@ def run_find_appointment(
     *,
     job_label: str | None = None,
 ) -> None:
-    job_log = create_job_logger(job_label)
-
-    auth = Authenticator(username, password)
-    try:
-        auth.login()
-    except MFAError:
-        job_log.error("Failed MFA, please try again.")
-        DEVICE_ID_PATH.unlink(missing_ok=True)
-        raise
-
-    time.sleep(5)
-
-    finder = AppointmentFinder(auth.session, auth.headers)
-    next_run = NextRun(args.interval)
-    previous_appointments: list[dict[str, Any]] = []
-
-    try:
-        while True:
-            try:
-                auth.refresh_token()
-            except InvalidGrantError as e:
-                job_log.warning(f"Token refresh failed: {e}")
-                job_log.info("Attempting to re-login...")
-                auth.login()
-                time.sleep(5)
-                job_log.info("Re-login successful, continuing...")
-                continue
-
-            if not next_run.is_time_to_run():
-                time.sleep(30)
-                continue
-
-            next_run.set_next_run()
-
-            try:
-                appointments = finder.find_appointments(
-                    args.region,
-                    args.specialty,
-                    args.clinic,
-                    args.date,
-                    args.enddate,
-                    args.language,
-                    args.doctor,
-                )
-            except ExpiredToken as e:
-                job_log.warning("Expired token error: %s", e)
-                continue
-
-            if previous_appointments:
-                new_appointments = [
-                    appointment
-                    for appointment in appointments
-                    if appointment not in previous_appointments
-                ]
-            else:
-                new_appointments = appointments
-
-            previous_appointments = appointments
-
-            display_appointments(new_appointments, logger=job_log)
-
-            fresh_appointments = seen_store.filter_new(new_appointments)
-            if fresh_appointments:
-                Notifier.send_notification(
-                    fresh_appointments, args.notification, args.title
-                )
-
-            if next_run.interval_minutes is None:
-                job_log.info("Exiting after one run due to interval set to None.")
-                break
-    except Exception as e:
-        job_log.error(f"Error in main loop: {e}")
-        Notifier.send_notification(
-            [],
-            args.notification,
-            f"medichaser crashed during run:\n {e}",
-        )
-        raise
+    AppointmentJobRunner(
+        args,
+        username,
+        password,
+        seen_store,
+        job_label=job_label,
+    ).run_forever()
 
 
 def run_parallel(
@@ -1262,30 +1347,86 @@ def run_parallel(
             parallel_limit,
         )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_limit) as executor:
-        futures = [
-            executor.submit(
-                run_find_appointment,
-                job.args,
-                username,
-                password,
-                seen_store,
-                job_label=job.label,
-            )
-            for job in config.jobs
-        ]
+    runners = [
+        AppointmentJobRunner(
+            job.args,
+            username,
+            password,
+            seen_store,
+            job_label=job.label,
+        )
+        for job in config.jobs
+    ]
 
+    schedule: list[tuple[float, int, AppointmentJobRunner]] = []
+    start_time = time.monotonic()
+    order_counter = count()
+    for runner in runners:
+        heapq.heappush(schedule, (start_time, next(order_counter), runner))
+
+    active_futures: dict[concurrent.futures.Future[float], AppointmentJobRunner] = {}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_limit) as executor:
         try:
-            for future in concurrent.futures.as_completed(futures):
-                future.result()
+            while schedule or active_futures:
+                now = time.monotonic()
+                while (
+                    schedule
+                    and len(active_futures) < parallel_limit
+                    and schedule[0][0] <= now
+                ):
+                    _, _, runner = heapq.heappop(schedule)
+                    future = executor.submit(runner.run_cycle)
+                    active_futures[future] = runner
+
+                if not active_futures:
+                    if schedule:
+                        wait_time = max(0.0, schedule[0][0] - time.monotonic())
+                        if wait_time > 0:
+                            time.sleep(wait_time)
+                        continue
+                    break
+
+                timeout = None
+                if schedule:
+                    timeout = max(0.0, schedule[0][0] - time.monotonic())
+
+                done, _ = concurrent.futures.wait(
+                    list(active_futures.keys()),
+                    timeout=timeout,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+
+                if not done:
+                    continue
+
+                for future in done:
+                    runner = active_futures.pop(future)
+                    try:
+                        wait_time = future.result()
+                    except KeyboardInterrupt:
+                        log.info("Received interrupt, cancelling parallel jobs.")
+                        for remaining in active_futures:
+                            remaining.cancel()
+                        raise
+                    except Exception as exc:  # pragma: no cover - safety net
+                        log.error(
+                            "Parallel appointment job terminated with exception: %s",
+                            exc,
+                        )
+                        for remaining in active_futures:
+                            remaining.cancel()
+                        raise
+
+                    if runner.active:
+                        next_run_at = time.monotonic() + (wait_time or 0.0)
+                        heapq.heappush(
+                            schedule,
+                            (next_run_at, next(order_counter), runner),
+                        )
         except KeyboardInterrupt:
             log.info("Received interrupt, cancelling parallel jobs.")
-            for future in futures:
-                future.cancel()
-            raise
-        except Exception as exc:  # pragma: no cover - safety net
-            log.error("Parallel appointment job terminated with exception: %s", exc)
-            for future in futures:
+            for future in active_futures:
                 future.cancel()
             raise
 
