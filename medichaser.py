@@ -1270,7 +1270,6 @@ def run_parallel(
                 username,
                 password,
                 seen_store,
-                command_name="find-appointment",
                 job_label=job.label,
             )
             for job in config.jobs
