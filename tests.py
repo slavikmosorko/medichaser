@@ -19,7 +19,7 @@ import json
 import typing
 from argparse import Namespace
 from typing import Any
-from unittest.mock import MagicMock, Mock
+from unittest.mock import ANY, MagicMock, Mock
 
 import pytest
 import requests
@@ -32,8 +32,10 @@ from medichaser import (
     MFAError,
     NextRun,
     Notifier,
+    SeenNotificationStore,
     display_appointments,
     json_date_serializer,
+    load_parallel_config,
     main,
 )
 from notifications import (
@@ -1135,10 +1137,46 @@ def test_main_find_appointment_single_run(monkeypatch: pytest.MonkeyPatch) -> No
     mock_finder_instance.find_appointments.assert_called_once_with(
         1, [2], 3, datetime.date(2025, 1, 1), datetime.date(2025, 1, 31), 6, 4
     )
-    mock_display.assert_called_once_with([{"id": 1, "name": "Appointment"}])
+    mock_display.assert_called_once_with(
+        [{"id": 1, "name": "Appointment"}], logger=ANY
+    )
     mock_notifier.assert_called_once_with(
         [{"id": 1, "name": "Appointment"}], "pushbullet", "Test"
     )
+
+
+def test_main_find_appointments(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Test invoking the parallel find-appointments command."""
+
+    config_path = tmp_path / "jobs.toml"
+    config_path.write_text("", encoding="utf-8")
+
+    mock_args = Namespace(
+        command="find-appointments",
+        config=config_path,
+        max_parallel=3,
+    )
+
+    mock_parser = MagicMock()
+    mock_parser.parse_args.return_value = mock_args
+    monkeypatch.setattr("argparse.ArgumentParser", lambda **kwargs: mock_parser)
+
+    monkeypatch.setattr(
+        "os.environ", {"MEDICOVER_USER": "user", "MEDICOVER_PASS": "pass"}
+    )
+
+    mock_run_parallel = MagicMock()
+    monkeypatch.setattr("medichaser.run_parallel", mock_run_parallel)
+
+    main()
+
+    mock_run_parallel.assert_called_once()
+    called_args = mock_run_parallel.call_args[0]
+    assert called_args[0] is config_path
+    assert called_args[1] == "user"
+    assert called_args[2] == "pass"
+    assert isinstance(called_args[3], SeenNotificationStore)
+    assert called_args[4] == 3
 
 
 def test_main_list_filters_regions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1302,14 +1340,101 @@ def test_main_find_appointment_interval_run(monkeypatch: pytest.MonkeyPatch) -> 
     assert mock_auth_instance.refresh_token.call_count == 4
     assert mock_finder_instance.find_appointments.call_count == 2
 
-    mock_display.assert_any_call([{"id": 1, "name": "Appointment 1"}])
+    mock_display.assert_any_call(
+        [{"id": 1, "name": "Appointment 1"}], logger=ANY
+    )
     mock_notifier.assert_any_call(
         [{"id": 1, "name": "Appointment 1"}], "pushover", "Interval Test"
     )
 
-    mock_display.assert_any_call([{"id": 2, "name": "Appointment 2"}])
+    mock_display.assert_any_call(
+        [{"id": 2, "name": "Appointment 2"}], logger=ANY
+    )
     mock_notifier.assert_any_call(
         [{"id": 2, "name": "Appointment 2"}], "pushover", "Interval Test"
+    )
+
+
+def test_main_find_appointment_reappearance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure notifications are sent only once for the same appointment."""
+
+    mock_args = Namespace(
+        command="find-appointment",
+        region=1,
+        specialty=[2],
+        clinic=3,
+        doctor=4,
+        language=6,
+        date=datetime.date(2025, 1, 1),
+        enddate=datetime.date(2025, 1, 31),
+        interval=10,
+        notification="telegram",
+        title="Reappearance Test",
+    )
+
+    mock_parser = MagicMock()
+    mock_parser.parse_args.return_value = mock_args
+    monkeypatch.setattr("argparse.ArgumentParser", lambda **kwargs: mock_parser)
+
+    monkeypatch.setattr(
+        "os.environ", {"MEDICOVER_USER": "user", "MEDICOVER_PASS": "pass"}
+    )
+
+    mock_auth_instance = MagicMock()
+    mock_auth_instance.refresh_token.side_effect = [None, None, None, None]
+    monkeypatch.setattr("medichaser.Authenticator", lambda u, p: mock_auth_instance)
+
+    mock_finder_instance = MagicMock()
+    mock_finder_instance.find_appointments.side_effect = [
+        [{"id": 1, "name": "Appointment 1"}],
+        [],
+        [{"id": 1, "name": "Appointment 1"}],
+    ]
+    monkeypatch.setattr(
+        "medichaser.AppointmentFinder", lambda s, h: mock_finder_instance
+    )
+
+    mock_notifier = MagicMock()
+    monkeypatch.setattr("medichaser.Notifier.send_notification", mock_notifier)
+
+    mock_display = MagicMock()
+    monkeypatch.setattr("medichaser.display_appointments", mock_display)
+
+    run_count = 0
+
+    def mock_is_time_to_run() -> typing.Literal[True]:
+        nonlocal run_count
+        run_count += 1
+        if run_count > 3:
+            raise StopIteration
+        return True
+
+    mock_next_run_instance = MagicMock()
+    mock_next_run_instance.is_time_to_run.side_effect = mock_is_time_to_run
+    mock_next_run_instance.interval_minutes = 10
+    monkeypatch.setattr("medichaser.NextRun", lambda i: mock_next_run_instance)
+
+    monkeypatch.setattr("time.sleep", lambda t: None)
+
+    with pytest.raises(StopIteration):
+        main()
+
+    appointment_calls = [
+        call_args
+        for call_args in (
+            (args, kwargs) for args, kwargs in mock_notifier.call_args_list
+        )
+        if call_args[0] and call_args[0][0]
+    ]
+
+    assert len(appointment_calls) == 1
+    args, _ = appointment_calls[0]
+    assert args[0] == [{"id": 1, "name": "Appointment 1"}]
+    assert args[1] == "telegram"
+    assert args[2] == "Reappearance Test"
+
+    mock_display.assert_any_call(
+        [{"id": 1, "name": "Appointment 1"}], logger=ANY
     )
 
 
@@ -1352,3 +1477,71 @@ def test_main_list_filters_clinics(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_auth_instance.refresh_token.assert_called_once()
     mock_finder_instance.find_filters.assert_called_once_with(1, [2, 3])
     mock_log.info.assert_called_with("1 - Clinic 1")
+
+
+def test_load_parallel_config_success(tmp_path: Any) -> None:
+    """Ensure parallel configuration is parsed correctly."""
+
+    config_path = tmp_path / "appointments.toml"
+    config_path.write_text(
+        """
+        [settings]
+        max_parallel = 2
+
+        [[jobs]]
+        label = "endo"
+        region = 202
+        specialty = [27962]
+        doctor = 334258
+        notification = "telegram"
+        title = " Endokrynolog dorośli - porada telefoniczna"
+        interval = 5
+        date = 2025-01-01
+
+        [[jobs]]
+        region = 202
+        specialty = 192
+        notification = "telegram"
+        title = " Laryngolog dorośli"
+        enddate = 2025-01-31
+        """,
+        encoding="utf-8",
+    )
+
+    config = load_parallel_config(config_path)
+
+    assert config.max_parallel == 2
+    assert len(config.jobs) == 2
+
+    first_job = config.jobs[0]
+    assert first_job.label == "endo"
+    assert first_job.args.specialty == [27962]
+    assert first_job.args.doctor == 334258
+    assert first_job.args.interval == 5
+    assert first_job.args.date == datetime.date(2025, 1, 1)
+
+    second_job = config.jobs[1]
+    assert second_job.label is None
+    assert second_job.args.specialty == [192]
+    assert second_job.args.notification == "telegram"
+    assert second_job.args.enddate == datetime.date(2025, 1, 31)
+
+
+def test_load_parallel_config_invalid(tmp_path: Any) -> None:
+    """Invalid configuration values should raise ValueError."""
+
+    config_path = tmp_path / "bad.toml"
+    config_path.write_text(
+        """
+        [settings]
+        max_parallel = 0
+
+        [[jobs]]
+        region = 1
+        specialty = 2
+        """,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError):
+        load_parallel_config(config_path)

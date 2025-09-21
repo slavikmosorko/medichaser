@@ -21,6 +21,7 @@
 
 import argparse
 import base64
+import concurrent.futures
 import datetime
 import hashlib
 import json
@@ -32,8 +33,11 @@ import re
 import select
 import string
 import sys
+import threading
 import time
+import tomllib
 import uuid
+from dataclasses import dataclass
 from logging.handlers import RotatingFileHandler
 from typing import Any, cast
 from urllib.parse import parse_qs, quote_plus, unquote_plus, urlparse
@@ -916,14 +920,17 @@ class Notifier:
         log.info("Notification sent successfully.")
 
 
-def display_appointments(appointments: list[dict[str, Any]]) -> None:
-    log.info("")
-    log.info("--------------------------------------------------")
+def display_appointments(
+    appointments: list[dict[str, Any]], *, logger: logging.Logger | None = None
+) -> None:
+    active_logger = logger or log
+    active_logger.info("")
+    active_logger.info("--------------------------------------------------")
     if not appointments:
-        log.info("No new appointments found.")
+        active_logger.info("No new appointments found.")
     else:
-        log.info("New appointments found:")
-        log.info("--------------------------------------------------")
+        active_logger.info("New appointments found:")
+        active_logger.info("--------------------------------------------------")
         for appointment in appointments:
             date = appointment.get("appointmentDate", "N/A")
             clinic = appointment.get("clinic", {}).get("name", "N/A")
@@ -935,12 +942,12 @@ def display_appointments(appointments: list[dict[str, Any]]) -> None:
                 if doctor_languages
                 else "N/A"
             )
-            log.info(f"Date: {date}")
-            log.info(f"  Clinic: {clinic}")
-            log.info(f"  Doctor: {doctor}")
-            log.info(f"  Specialty: {specialty}")
-            log.info(f"  Languages: {languages}")
-            log.info("--------------------------------------------------")
+            active_logger.info(f"Date: {date}")
+            active_logger.info(f"  Clinic: {clinic}")
+            active_logger.info(f"  Doctor: {doctor}")
+            active_logger.info(f"  Specialty: {specialty}")
+            active_logger.info(f"  Languages: {languages}")
+            active_logger.info("--------------------------------------------------")
 
 
 def json_date_serializer(obj: Any) -> str:
@@ -948,6 +955,175 @@ def json_date_serializer(obj: Any) -> str:
     if isinstance(obj, datetime.date | datetime.datetime):
         return obj.isoformat()
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
+class PrefixLoggerAdapter(logging.LoggerAdapter):
+    """Logger adapter that prepends a prefix to all log messages."""
+
+    def process(self, msg: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        prefix = self.extra.get("prefix", "")
+        if prefix:
+            msg = f"{prefix}{msg}"
+        return msg, kwargs
+
+
+class SeenNotificationStore:
+    """Thread-safe in-memory store of sent appointment notifications."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._seen: set[str] = set()
+
+    def _make_key(self, appointment: dict[str, Any]) -> str:
+        appointment_id = appointment.get("id")
+        if appointment_id is not None:
+            return str(appointment_id)
+
+        canonical = json.dumps(appointment, sort_keys=True, default=str)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def filter_new(self, appointments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return appointments that have not triggered a notification yet."""
+
+        fresh: list[dict[str, Any]] = []
+        with self._lock:
+            for appointment in appointments:
+                key = self._make_key(appointment)
+                if key not in self._seen:
+                    self._seen.add(key)
+                    fresh.append(appointment)
+        return fresh
+
+
+@dataclass
+class ParallelJob:
+    """Configuration for a single appointment search."""
+
+    args: argparse.Namespace
+    label: str | None = None
+
+
+@dataclass
+class ParallelConfig:
+    """Configuration for running multiple appointment searches."""
+
+    jobs: list[ParallelJob]
+    max_parallel: int | None = None
+
+
+def create_job_logger(label: str | None) -> logging.Logger:
+    """Return a logger that includes the job label in messages."""
+
+    if not label:
+        return log
+    return PrefixLoggerAdapter(log, {"prefix": f"[{label}] "})
+
+
+def _parse_date(value: Any, default: datetime.date | None = None) -> datetime.date | None:
+    if value is None:
+        return default
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+    if isinstance(value, str):
+        return datetime.date.fromisoformat(value)
+    raise ValueError(f"Unsupported date value: {value!r}")
+
+
+def load_parallel_config(config_path: pathlib.Path) -> ParallelConfig:
+    """Load appointment jobs from a TOML configuration file."""
+
+    try:
+        with config_path.open("rb") as file:
+            raw_config = tomllib.load(file)
+    except FileNotFoundError as exc:
+        raise ValueError(f"Configuration file not found: {config_path}") from exc
+
+    settings = cast(dict[str, Any], raw_config.get("settings", {}))
+    raw_jobs = raw_config.get("jobs")
+
+    if not isinstance(raw_jobs, list) or not raw_jobs:
+        raise ValueError("Configuration must define at least one job in [[jobs]].")
+
+    max_parallel = settings.get("max_parallel")
+    if max_parallel is not None:
+        if not isinstance(max_parallel, int) or max_parallel < 1:
+            raise ValueError("settings.max_parallel must be a positive integer if provided.")
+
+    jobs: list[ParallelJob] = []
+    for index, job in enumerate(raw_jobs, start=1):
+        if not isinstance(job, dict):
+            raise ValueError(f"Job #{index} must be a table.")
+
+        try:
+            region = int(job["region"])
+        except KeyError as exc:  # pragma: no cover - validated in tests
+            raise ValueError(f"Job #{index} is missing required field 'region'.") from exc
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Job #{index} has invalid region value: {job.get('region')!r}.") from exc
+
+        specialty_value = job.get("specialty")
+        if specialty_value is None:
+            raise ValueError(f"Job #{index} is missing required field 'specialty'.")
+        if isinstance(specialty_value, list):
+            try:
+                specialty = [int(item) for item in specialty_value]
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Job #{index} has invalid specialty list: {specialty_value!r}."
+                ) from exc
+        else:
+            try:
+                specialty = [int(specialty_value)]
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Job #{index} has invalid specialty value: {specialty_value!r}."
+                ) from exc
+
+        clinic = job.get("clinic")
+        clinic_id = int(clinic) if clinic is not None else None
+
+        doctor = job.get("doctor")
+        doctor_id = int(doctor) if doctor is not None else None
+
+        language = job.get("language")
+        language_id = int(language) if language is not None else None
+
+        interval = job.get("interval")
+        interval_minutes = int(interval) if interval is not None else None
+
+        start_date = _parse_date(job.get("date"), datetime.date.today())
+        end_date = _parse_date(job.get("enddate"))
+
+        notification = job.get("notification")
+        if notification is not None and not isinstance(notification, str):
+            raise ValueError(f"Job #{index} has invalid notification value: {notification!r}.")
+
+        title = job.get("title")
+        if title is not None and not isinstance(title, str):
+            raise ValueError(f"Job #{index} has invalid title value: {title!r}.")
+
+        label_value = job.get("label")
+        label = label_value if isinstance(label_value, str) else None
+
+        args = argparse.Namespace(
+            command="find-appointment",
+            region=region,
+            specialty=specialty,
+            clinic=clinic_id,
+            doctor=doctor_id,
+            date=start_date,
+            enddate=end_date,
+            notification=notification,
+            title=title,
+            language=language_id,
+            interval=interval_minutes,
+        )
+
+        jobs.append(ParallelJob(args=args, label=label))
+
+    return ParallelConfig(jobs=jobs, max_parallel=max_parallel)
 
 
 class NextRun:
@@ -970,6 +1146,163 @@ class NextRun:
         self.next_run = datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(
             minutes=self.interval_minutes
         )
+
+
+def run_find_appointment(
+    args: argparse.Namespace,
+    username: str,
+    password: str,
+    seen_store: SeenNotificationStore,
+    *,
+    command_name: str = "find-appointment",
+    job_label: str | None = None,
+) -> None:
+    job_log = create_job_logger(job_label)
+
+    auth = Authenticator(username, password)
+    try:
+        auth.login()
+    except MFAError:
+        job_log.error("Failed MFA, please try again.")
+        DEVICE_ID_PATH.unlink(missing_ok=True)
+        raise
+
+    time.sleep(5)
+
+    finder = AppointmentFinder(auth.session, auth.headers)
+
+    if getattr(args, "interval", None) is not None:
+        args_payload = {
+            key: value
+            for key, value in vars(args).items()
+            if key != "command"
+        }
+        Notifier.send_notification(
+            [],
+            args.notification,
+            f"medichaser started in interval with command: {command_name} and arguments: {json.dumps(args_payload, indent=2, default=json_date_serializer)}",
+        )
+
+    next_run = NextRun(args.interval)
+    previous_appointments: list[dict[str, Any]] = []
+
+    try:
+        while True:
+            try:
+                auth.refresh_token()
+            except InvalidGrantError as e:
+                job_log.warning(f"Token refresh failed: {e}")
+                job_log.info("Attempting to re-login...")
+                auth.login()
+                time.sleep(5)
+                job_log.info("Re-login successful, continuing...")
+                continue
+
+            if not next_run.is_time_to_run():
+                time.sleep(30)
+                continue
+
+            next_run.set_next_run()
+
+            try:
+                appointments = finder.find_appointments(
+                    args.region,
+                    args.specialty,
+                    args.clinic,
+                    args.date,
+                    args.enddate,
+                    args.language,
+                    args.doctor,
+                )
+            except ExpiredToken as e:
+                job_log.warning("Expired token error: %s", e)
+                continue
+
+            if previous_appointments:
+                new_appointments = [
+                    appointment
+                    for appointment in appointments
+                    if appointment not in previous_appointments
+                ]
+            else:
+                new_appointments = appointments
+
+            previous_appointments = appointments
+
+            display_appointments(new_appointments, logger=job_log)
+
+            fresh_appointments = seen_store.filter_new(new_appointments)
+            if fresh_appointments:
+                Notifier.send_notification(
+                    fresh_appointments, args.notification, args.title
+                )
+
+            if next_run.interval_minutes is None:
+                job_log.info("Exiting after one run due to interval set to None.")
+                break
+    except Exception as e:
+        job_log.error(f"Error in main loop: {e}")
+        Notifier.send_notification(
+            [],
+            args.notification,
+            f"medichaser crashed during run:\n {e}",
+        )
+        raise
+
+
+def run_parallel(
+    config_path: pathlib.Path,
+    username: str,
+    password: str,
+    seen_store: SeenNotificationStore,
+    override_parallel: int | None = None,
+) -> None:
+    config = load_parallel_config(config_path)
+
+    parallel_limit = override_parallel or config.max_parallel or len(config.jobs)
+    if parallel_limit < 1:
+        raise ValueError("Parallel limit must be at least 1.")
+
+    if len(config.jobs) > parallel_limit:
+        log.info(
+            "Running %s jobs with a parallel limit of %s. Remaining jobs will start when slots free up.",
+            len(config.jobs),
+            parallel_limit,
+        )
+    else:
+        log.info(
+            "Running %s jobs with a parallel limit of %s.",
+            len(config.jobs),
+            parallel_limit,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_limit) as executor:
+        futures = [
+            executor.submit(
+                run_find_appointment,
+                job.args,
+                username,
+                password,
+                seen_store,
+                command_name="find-appointment",
+                job_label=job.label,
+            )
+            for job in config.jobs
+        ]
+
+        try:
+            for future in concurrent.futures.as_completed(futures):
+                future.result()
+        except KeyboardInterrupt:
+            log.info("Received interrupt, cancelling parallel jobs.")
+            for future in futures:
+                future.cancel()
+            raise
+        except Exception as exc:  # pragma: no cover - safety net
+            log.error("Parallel appointment job terminated with exception: %s", exc)
+            for future in futures:
+                future.cancel()
+            raise
 
 
 def main() -> None:
@@ -1034,6 +1367,24 @@ def main() -> None:
         help="Repeat interval in minutes",
     )
 
+    find_appointments = subparsers.add_parser(
+        "find-appointments",
+        help="Run multiple appointment searches in parallel",
+    )
+    find_appointments.add_argument(
+        "-c",
+        "--config",
+        required=True,
+        type=pathlib.Path,
+        help="Path to TOML configuration file with [[jobs]] entries",
+    )
+    find_appointments.add_argument(
+        "-m",
+        "--max-parallel",
+        type=int,
+        help="Override maximum number of concurrent searches",
+    )
+
     list_filters = subparsers.add_parser("list-filters", help="List filters")
     list_filters_subparsers = list_filters.add_subparsers(
         dest="filter_type", required=True, help="Type of filter to list"
@@ -1068,6 +1419,28 @@ def main() -> None:
         )
         sys.exit(1)
 
+    seen_store = SeenNotificationStore()
+
+    if args.command == "find-appointment":
+        run_find_appointment(
+            args,
+            username,
+            password,
+            seen_store,
+            command_name="find-appointment",
+        )
+        return
+
+    if args.command == "find-appointments":
+        run_parallel(
+            args.config,
+            username,
+            password,
+            seen_store,
+            args.max_parallel,
+        )
+        return
+
     auth = Authenticator(username, password)
     try:
         auth.login()
@@ -1080,85 +1453,7 @@ def main() -> None:
 
     finder = AppointmentFinder(auth.session, auth.headers)
 
-    if args.command == "find-appointment":
-        if args.interval is not None:
-            Notifier.send_notification(
-                [],
-                args.notification,
-                f"medichaser started in interval with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
-            )
-
-        next_run = NextRun(args.interval)
-        previous_appointments: list[dict[str, Any]] = []
-
-        try:
-            while True:
-                # Authenticate
-                try:
-                    auth.refresh_token()
-                except InvalidGrantError as e:
-                    log.warning(f"Token refresh failed: {e}")
-                    log.info("Attempting to re-login...")
-                    auth.login()
-                    time.sleep(5)
-                    log.info("Re-login successful, continuing...")
-                    continue
-
-                if not next_run.is_time_to_run():
-                    time.sleep(30)
-                    continue
-
-                next_run.set_next_run()
-
-                # Find appointments
-                try:
-                    appointments = finder.find_appointments(
-                        args.region,
-                        args.specialty,
-                        args.clinic,
-                        args.date,
-                        args.enddate,
-                        args.language,
-                        args.doctor,
-                    )
-                except ExpiredToken as e:
-                    log.warning("Expired token error: %s", e)
-                    continue
-
-                # Find new appointments
-                if previous_appointments:
-                    new_appointments = [
-                        x for x in appointments if x not in previous_appointments
-                    ]
-                else:
-                    new_appointments = appointments
-
-                previous_appointments = appointments
-
-                # Display appointments
-                display_appointments(new_appointments)
-
-                # Send notification if appointments are found
-                if new_appointments:
-                    Notifier.send_notification(
-                        new_appointments, args.notification, args.title
-                    )
-
-                if next_run.interval_minutes is None:
-                    log.info("Exiting after one run due to interval set to None.")
-                    break
-
-                continue
-        except Exception as e:
-            log.error(f"Error in main loop: {e}")
-            Notifier.send_notification(
-                [],
-                args.notification,
-                f"medichaser crashed during run:\n {e}",
-            )
-            raise
-
-    elif args.command == "list-filters":
+    if args.command == "list-filters":
         # Authenticate
         try:
             auth.refresh_token()

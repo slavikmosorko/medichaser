@@ -14,6 +14,7 @@ The application is designed to be run in a Docker container and includes a `ttyd
 ## Features
 
 - Search for appointments by region, specialty, clinic, doctor, date range, and language at a configurable interval.
+- Run multiple appointment searches in parallel from a TOML config with deduplicated notifications.
 - Handles Multi-Factor Authentication (MFA).
 - Sends notifications via Gotify, Telegram, Pushbullet, Pushover, Prowl and XMPP.
 - Remote management through an integrated `ttyd` web terminal.
@@ -154,6 +155,33 @@ All commands are run from the web terminal.
 
     For more information on using screen, check out this [guide](https://www.gnu.org/software/screen/manual/screen.html).
 
+### Running Multiple Searches in Parallel
+
+You can describe several appointment searches in a single TOML file and execute them in parallel. Notifications are sent only the first time a slot is seen, even if the same appointment reappears later.
+
+1. Copy the example configuration and adjust it to your needs:
+
+    ```bash
+    cp appointments.example.toml appointments.toml
+    $EDITOR appointments.toml
+    ```
+
+    Each `[[jobs]]` entry maps directly to the arguments of `find-appointment`. You can optionally add a `label` field to make log output easier to read. The optional `[settings]` table accepts `max_parallel`, which limits how many jobs run concurrently.
+
+2. Start the parallel searcher:
+
+    ```bash
+    python medichaser.py find-appointments --config appointments.toml
+    ```
+
+    To override the concurrency defined in the file, pass `--max-parallel`:
+
+    ```bash
+    python medichaser.py find-appointments --config appointments.toml --max-parallel 2
+    ```
+
+All workers share an in-memory cache of delivered notifications, so you will only be alerted once per appointment slot.
+
 ---
 
 ## Notifications Setup
@@ -189,6 +217,62 @@ Add the required environment variables for your preferred service to the `.env` 
 - `NOTIFIERS_XMPP_JID`: Your full JID (`user@example.com`).
 - `NOTIFIERS_XMPP_PASSWORD`: Your password.
 - `NOTIFIERS_XMPP_RECEIVER`: The recipient's JID.
+
+---
+
+## Deploying to Fly.io
+
+This repository includes a ready-to-use [`fly.toml`](./fly.toml). The configuration runs the web terminal on the `web` process and the parallel appointment watcher on the `watcher` process.
+
+1. **Prepare your configuration locally.**
+
+    ```bash
+    cp appointments.example.toml appointments.toml
+    $EDITOR appointments.toml
+    ```
+
+2. **Initialize the Fly application (without deploying yet):**
+
+    ```bash
+    fly launch --copy-config --no-deploy
+    ```
+
+3. **Create a persistent volume for tokens, logs, and configuration:**
+
+    ```bash
+    fly volumes create medichaser_data --size 1 --region <REGION>
+    ```
+
+4. **Store your Medicover credentials and notifier secrets:**
+
+    ```bash
+    fly secrets set MEDICOVER_USER="username" MEDICOVER_PASS="password"
+    # Add additional notifier secrets as needed
+    ```
+
+5. **Deploy the application:**
+
+    ```bash
+    fly deploy --remote-only
+    ```
+
+6. **Upload the appointment configuration.** Open the web terminal served by the `web` process (`https://<app-name>.fly.dev`) and copy `appointments.toml` to `/app/data/appointments.toml` (the path referenced by `APPOINTMENTS_CONFIG`).
+
+7. **Start the watcher process:**
+
+    ```bash
+    fly scale count watcher=1
+    ```
+
+    Adjust the count or the `max_parallel` value inside `appointments.toml` if you need to change concurrency later.
+
+8. **Monitor the service:**
+
+    ```bash
+    fly logs --process watcher
+    ```
+
+You can customize the configuration path by changing the `APPOINTMENTS_CONFIG` environment variable in `fly.toml`.
 
 ---
 
