@@ -5,27 +5,32 @@
 loop_interval_seconds = 30
 
 [[jobs]]
-label = "endo-phone"
+label = "job1"
 region = 202
 specialty = [27962]
 doctor = 334258
-interval = 10
 notification = "telegram"
-title = " Endokrynolog dorośli - porada telefoniczna"
+title = "Endokrynolog dorośli - porada telefoniczna"
 
 [[jobs]]
-label = "allergy"
+label = "job2"
+region = 202
+specialty = [176]
+doctor = 499430
+notification = "telegram"
+title = "Alergolog dorośli"
+
+[[jobs]]
+label = "job3"
 region = 202
 specialty = [178]
 doctor = 499430
-interval = 10
 notification = "telegram"
-title = " Alergolog dorośli odczulani"
+title = "Alergolog dorośli odczulanie"
 
 [[jobs]]
-label = "laryngology"
+label = "job4"
 region = 202
 specialty = [192]
-interval = 10
 notification = "telegram"
-title = " Laryngolog dorośli"
+title = "Laryngolog dorośli"

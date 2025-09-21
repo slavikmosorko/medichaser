@@ -6,7 +6,6 @@ label = "endo-phone"
 region = 202
 specialty = [27962]
 doctor = 334258
-interval = 10
 notification = "telegram"
 title = "Endokrynolog dorośli - porada telefoniczna"
 
@@ -15,7 +14,6 @@ label = "allergy"
 region = 202
 specialty = [178]
 doctor = 499430
-interval = 10
 notification = "telegram"
 title = "Alergolog dorośli odczulani"
 
@@ -23,6 +21,5 @@ title = "Alergolog dorośli odczulani"
 label = "laryngology"
 region = 202
 specialty = [192]
-interval = 10
 notification = "telegram"
 title = "Laryngolog dorośli"
