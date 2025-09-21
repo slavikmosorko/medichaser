@@ -14,7 +14,7 @@ The application is designed to be run in a Docker container and includes a `ttyd
 ## Features
 
 - Search for appointments by region, specialty, clinic, doctor, date range, and language at a configurable interval.
-- Run multiple appointment searches in parallel from a TOML config with deduplicated notifications.
+- Run multiple appointment searches sequentially from a TOML config with deduplicated notifications.
 - Handles Multi-Factor Authentication (MFA).
 - Sends notifications via Gotify, Telegram, Pushbullet, Pushover, Prowl and XMPP.
 - Remote management through an integrated `ttyd` web terminal.
@@ -155,9 +155,9 @@ All commands are run from the web terminal.
 
     For more information on using screen, check out this [guide](https://www.gnu.org/software/screen/manual/screen.html).
 
-### Running Multiple Searches in Parallel
+### Running Multiple Searches Sequentially
 
-You can describe several appointment searches in a single TOML file and execute them in parallel. Notifications are sent only the first time a slot is seen, even if the same appointment reappears later.
+You can describe several appointment searches in a single TOML file and execute them sequentially. Notifications are sent only the first time a slot is seen, even if the same appointment reappears later.
 
 1. Copy the example configuration and adjust it to your needs:
 
@@ -166,18 +166,12 @@ You can describe several appointment searches in a single TOML file and execute 
     $EDITOR appointments.toml
     ```
 
-    Each `[[jobs]]` entry maps directly to the arguments of `find-appointment`. You can optionally add a `label` field to make log output easier to read. The optional `[settings]` table accepts `max_parallel`, which limits how many jobs run concurrently.
+    Each `[[jobs]]` entry maps directly to the arguments of `find-appointment`. You can optionally add a `label` field to make log output easier to read. The optional `[settings]` table accepts `loop_interval_seconds`, which controls how long the worker waits after running all jobs before starting the next cycle. The default is 30 seconds.
 
-2. Start the parallel searcher:
+2. Start the sequential searcher:
 
     ```bash
     python medichaser.py find-appointments --config appointments.toml
-    ```
-
-    To override the concurrency defined in the file, pass `--max-parallel`:
-
-    ```bash
-    python medichaser.py find-appointments --config appointments.toml --max-parallel 2
     ```
 
 All workers share an in-memory cache of delivered notifications, so you will only be alerted once per appointment slot.
@@ -222,7 +216,7 @@ Add the required environment variables for your preferred service to the `.env` 
 
 ## Deploying to Fly.io
 
-This repository includes a ready-to-use [`fly.toml`](./fly.toml). The configuration runs the web terminal on the `web` process and the parallel appointment watcher on the `watcher` process.
+This repository includes a ready-to-use [`fly.toml`](./fly.toml). The configuration runs the web terminal on the `web` process and the sequential appointment watcher on the `watcher` process.
 
 1. **Prepare your configuration locally.**
 
@@ -256,7 +250,7 @@ This repository includes a ready-to-use [`fly.toml`](./fly.toml). The configurat
     fly scale count watcher=1
     ```
 
-    Adjust the count or the `max_parallel` value inside `appointments.toml` if you need to change concurrency later.
+    Adjust the count or the `loop_interval_seconds` value inside `appointments.toml` if you need to change how frequently jobs repeat.
 
 6. **Monitor the service:**
 

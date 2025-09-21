@@ -1,8 +1,8 @@
-# Example configuration for running multiple appointment searches in parallel.
+# Example configuration for running multiple appointment searches sequentially.
 # Copy this file to appointments.toml and adjust the values to match your filters.
 
 [settings]
-max_parallel = 3
+loop_interval_seconds = 30
 
 [[jobs]]
 label = "endo-phone"

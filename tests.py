@@ -1150,7 +1150,7 @@ def test_main_find_appointment_single_run(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_main_find_appointments(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """Test invoking the parallel find-appointments command."""
+    """Test invoking the sequential find-appointments command."""
 
     config_path = tmp_path / "jobs.toml"
     config_path.write_text("", encoding="utf-8")
@@ -1158,7 +1158,6 @@ def test_main_find_appointments(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) 
     mock_args = Namespace(
         command="find-appointments",
         config=config_path,
-        max_parallel=3,
     )
 
     mock_parser = MagicMock()
@@ -1180,7 +1179,6 @@ def test_main_find_appointments(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) 
     assert called_args[1] == "user"
     assert called_args[2] == "pass"
     assert isinstance(called_args[3], SeenNotificationStore)
-    assert called_args[4] == 3
 
 
 def test_main_list_filters_regions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1488,13 +1486,13 @@ def test_main_list_filters_clinics(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_load_parallel_config_success(tmp_path: Any) -> None:
-    """Ensure parallel configuration is parsed correctly."""
+    """Ensure sequential job configuration is parsed correctly."""
 
     config_path = tmp_path / "appointments.toml"
     config_path.write_text(
         """
         [settings]
-        max_parallel = 2
+        loop_interval_seconds = 15
 
         [[jobs]]
         label = "endo"
@@ -1518,7 +1516,7 @@ def test_load_parallel_config_success(tmp_path: Any) -> None:
 
     config = load_parallel_config(config_path)
 
-    assert config.max_parallel == 2
+    assert config.loop_interval_seconds == 15.0
     assert len(config.jobs) == 2
 
     first_job = config.jobs[0]
@@ -1542,7 +1540,7 @@ def test_load_parallel_config_invalid(tmp_path: Any) -> None:
     config_path.write_text(
         """
         [settings]
-        max_parallel = 0
+        loop_interval_seconds = -5
 
         [[jobs]]
         region = 1
@@ -1555,16 +1553,15 @@ def test_load_parallel_config_invalid(tmp_path: Any) -> None:
         load_parallel_config(config_path)
 
 
-def test_run_parallel_executes_all_jobs_with_limited_threads(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """All jobs should be executed even when thread limit is lower than job count."""
+def test_run_parallel_runs_jobs_sequentially(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Jobs should be executed one after another without parallelism."""
 
     config = ParallelConfig(
         jobs=[
             ParallelJob(args=Namespace(), label="job1"),
             ParallelJob(args=Namespace(), label="job2"),
-        ]
+        ],
+        loop_interval_seconds=0,
     )
 
     monkeypatch.setattr("medichaser.load_parallel_config", lambda path: config)
@@ -1590,13 +1587,13 @@ def test_run_parallel_executes_all_jobs_with_limited_threads(
             return 0.0
 
     monkeypatch.setattr("medichaser.AppointmentJobRunner", StubRunner)
+    monkeypatch.setattr("time.sleep", lambda seconds: None)
 
     run_parallel(
         pathlib.Path("config.toml"),
         "user",
         "pass",
         SeenNotificationStore(),
-        override_parallel=1,
     )
 
     assert execution_order == ["job1", "job2"]
