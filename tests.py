@@ -16,6 +16,7 @@
 
 import datetime
 import json
+import pathlib
 import typing
 from argparse import Namespace
 from typing import Any
@@ -27,6 +28,7 @@ from notifiers.exceptions import BadArguments
 
 from medichaser import (
     AppointmentFinder,
+    AppointmentJob,
     Authenticator,
     InvalidGrantError,
     MFAError,
@@ -34,7 +36,9 @@ from medichaser import (
     Notifier,
     display_appointments,
     json_date_serializer,
+    load_jobs_from_config,
     main,
+    run_appointment_jobs,
 )
 from notifications import (
     gotify_notify,
@@ -728,6 +732,199 @@ class TestUtilityFunctions:
         mock_log.info.assert_any_call("Date: 2025-01-01T10:00:00")
 
 
+class TestSequentialAppointments:
+    """Tests for loading and executing sequential appointment jobs."""
+
+    def test_load_jobs_from_config(self, tmp_path: pathlib.Path) -> None:
+        """Jobs and settings are loaded from a TOML file."""
+
+        config_path = tmp_path / "appointments.toml"
+        config_path.write_text(
+            """
+[settings]
+loop_interval_seconds = 15
+
+[[jobs]]
+label = "alpha"
+region = 1
+specialty = [2, 3]
+clinic = 5
+doctor = 10
+date = 2025-01-01
+enddate = 2025-02-01
+language = 6
+notification = "telegram"
+title = "Test title"
+"""
+        )
+
+        interval, jobs = load_jobs_from_config(config_path)
+
+        assert interval == 15
+        assert len(jobs) == 1
+
+        job = jobs[0]
+        assert job.label == "alpha"
+        assert job.region == 1
+        assert job.specialty == [2, 3]
+        assert job.clinic == 5
+        assert job.doctor == 10
+        assert job.start_date == datetime.date(2025, 1, 1)
+        assert job.end_date == datetime.date(2025, 2, 1)
+        assert job.language == 6
+        assert job.notification == "telegram"
+        assert job.title == "Test title"
+
+    def test_load_jobs_from_config_requires_jobs(
+            self, tmp_path: pathlib.Path
+    ) -> None:
+        """An error is raised when no jobs are defined."""
+
+        config_path = tmp_path / "appointments.toml"
+        config_path.write_text(
+            """
+[settings]
+loop_interval_seconds = 10
+"""
+        )
+
+        with pytest.raises(ValueError, match="must define at least one job"):
+            load_jobs_from_config(config_path)
+
+    def test_run_appointment_jobs_executes_and_notifies(
+            self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Sequential jobs execute once and trigger notifications for new slots."""
+
+        job = AppointmentJob(
+            label="job1",
+            region=1,
+            specialty=[2],
+            start_date=datetime.date(2025, 1, 1),
+            notification="telegram",
+            title="Hello",
+        )
+
+        auth = MagicMock()
+        finder = MagicMock()
+        finder.find_appointments.return_value = [{"id": 1}]
+
+        notifications: list[tuple[list[dict[str, Any]], str | None, str | None]] = []
+
+        def fake_notify(
+                appointments: list[dict[str, Any]],
+                notifier: str | None,
+                title: str | None,
+        ) -> None:
+            notifications.append((appointments, notifier, title))
+
+        monkeypatch.setattr("medichaser.Notifier.send_notification", fake_notify)
+
+        run_appointment_jobs(
+            auth,
+            finder,
+            [job],
+            interval_seconds=None,
+            max_cycles=1,
+        )
+
+        auth.refresh_token.assert_called_once()
+        finder.find_appointments.assert_called_once_with(
+            1,
+            [2],
+            None,
+            datetime.date(2025, 1, 1),
+            None,
+            None,
+            None,
+        )
+
+        assert notifications == [([{"id": 1}], "telegram", "Hello")]
+
+    def test_run_appointment_jobs_deduplicates_notifications(
+            self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Notifications are only sent for new appointments across cycles."""
+
+        job = AppointmentJob(
+            label="job1",
+            region=1,
+            specialty=[2],
+            start_date=datetime.date(2025, 1, 1),
+            notification="telegram",
+            title="Hello",
+        )
+
+        auth = MagicMock()
+        finder = MagicMock()
+        finder.find_appointments.side_effect = [[{"id": 1}], [{"id": 1}]]
+
+        notifications: list[list[dict[str, Any]]] = []
+
+        def fake_notify(
+                appointments: list[dict[str, Any]],
+                notifier: str | None,
+                title: str | None,
+        ) -> None:
+            notifications.append(appointments)
+
+        monkeypatch.setattr("medichaser.Notifier.send_notification", fake_notify)
+
+        run_appointment_jobs(
+            auth,
+            finder,
+            [job],
+            interval_seconds=1,
+            max_cycles=2,
+        )
+
+        assert finder.find_appointments.call_count == 2
+        assert len(notifications) == 1
+
+    def test_run_appointment_jobs_notifies_only_first_occurrence(
+            self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A slot is only announced the first time it appears."""
+
+        job = AppointmentJob(
+            label="job1",
+            region=1,
+            specialty=[2],
+            start_date=datetime.date(2025, 1, 1),
+            notification="telegram",
+            title="Hello",
+        )
+
+        auth = MagicMock()
+        finder = MagicMock()
+        finder.find_appointments.side_effect = [
+            [{"id": 1}],
+            [],
+            [{"id": 1}],
+        ]
+
+        notifications: list[list[dict[str, Any]]] = []
+
+        def fake_notify(
+                appointments: list[dict[str, Any]],
+                notifier: str | None,
+                title: str | None,
+        ) -> None:
+            notifications.append(appointments)
+
+        monkeypatch.setattr("medichaser.Notifier.send_notification", fake_notify)
+
+        run_appointment_jobs(
+            auth,
+            finder,
+            [job],
+            interval_seconds=1,
+            max_cycles=3,
+        )
+
+        assert finder.find_appointments.call_count == 3
+        assert len(notifications) == 1
+
 class TestNotificationFunctions:
     """Test cases for notification functions."""
 
@@ -1310,6 +1507,50 @@ def test_main_find_appointment_interval_run(monkeypatch: pytest.MonkeyPatch) -> 
     mock_display.assert_any_call([{"id": 2, "name": "Appointment 2"}])
     mock_notifier.assert_any_call(
         [{"id": 2, "name": "Appointment 2"}], "pushover", "Interval Test"
+    )
+
+
+def test_main_find_appointments_command(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Test the sequential finder command entry point."""
+
+    config_path = tmp_path / "custom.toml"
+
+    mock_args = Namespace(
+        command="find-appointments",
+        config=config_path,
+    )
+
+    mock_parser = MagicMock()
+    mock_parser.parse_args.return_value = mock_args
+    monkeypatch.setattr("argparse.ArgumentParser", lambda **kwargs: mock_parser)
+
+    monkeypatch.setattr(
+        "os.environ", {"MEDICOVER_USER": "user", "MEDICOVER_PASS": "pass"}
+    )
+
+    mock_auth_instance = MagicMock()
+    monkeypatch.setattr("medichaser.Authenticator", lambda u, p: mock_auth_instance)
+
+    mock_finder_instance = MagicMock()
+    monkeypatch.setattr("medichaser.AppointmentFinder", lambda s, h: mock_finder_instance)
+
+    job = AppointmentJob(label="job1", region=1, specialty=[2])
+
+    def fake_load(path: pathlib.Path) -> tuple[int | None, list[AppointmentJob]]:
+        assert path == config_path
+        return 15, [job]
+
+    monkeypatch.setattr("medichaser.load_jobs_from_config", fake_load)
+
+    run_jobs = MagicMock()
+    monkeypatch.setattr("medichaser.run_appointment_jobs", run_jobs)
+
+    main()
+
+    run_jobs.assert_called_once_with(
+        mock_auth_instance, mock_finder_instance, [job], 15
     )
 
 

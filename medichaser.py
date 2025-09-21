@@ -23,7 +23,9 @@ import select
 import string
 import sys
 import time
+import tomllib
 import uuid
+from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 from typing import Any, cast
 from urllib.parse import parse_qs, quote_plus, unquote_plus, urlparse
@@ -933,6 +935,13 @@ def display_appointments(appointments: list[dict[str, Any]]) -> None:
             log.info("--------------------------------------------------")
 
 
+def appointment_fingerprint(appointment: dict[str, Any]) -> str:
+    """Return a stable fingerprint for a single appointment record."""
+
+    serialized = json.dumps(appointment, sort_keys=True, default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def json_date_serializer(obj: Any) -> str:
     """JSON serializer for objects not serializable by default json code"""
     if isinstance(obj, datetime.date | datetime.datetime):
@@ -961,6 +970,254 @@ class NextRun:
             minutes=self.interval_minutes
         )
 
+
+@dataclass(slots=True)
+class AppointmentJob:
+    """Configuration for a single sequential appointment search."""
+
+    label: str
+    region: int
+    specialty: list[int]
+    clinic: int | None = None
+    doctor: int | None = None
+    start_date: datetime.date = field(default_factory=datetime.date.today)
+    end_date: datetime.date | None = None
+    language: int | None = None
+    notification: str | None = None
+    title: str | None = None
+
+
+def _parse_optional_int(
+        value: object, field_name: str, job_label: str
+) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
+        raise ValueError(
+            f"Job '{job_label}' has invalid integer value for '{field_name}'."
+        ) from exc
+
+
+def _parse_optional_date(
+        value: object, field_name: str, job_label: str
+) -> datetime.date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"Job '{job_label}' has invalid date for '{field_name}': {value}"
+            ) from exc
+    raise ValueError(
+        f"Job '{job_label}' has unsupported type for '{field_name}'."
+    )
+
+
+def _parse_specialty(value: object, job_label: str) -> list[int]:
+    if isinstance(value, list):
+        specialties: list[int] = []
+        for item in value:
+            try:
+                specialties.append(int(item))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Job '{job_label}' has non-integer specialty value: {item}"
+                ) from exc
+        if not specialties:
+            raise ValueError(
+                f"Job '{job_label}' must define at least one specialty."
+            )
+        return specialties
+    if value is None:
+        raise ValueError(f"Job '{job_label}' is missing required 'specialty' field.")
+    try:
+        return [int(value)]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Job '{job_label}' has invalid value for 'specialty': {value}"
+        ) from exc
+
+
+def load_jobs_from_config(
+        config_path: pathlib.Path,
+) -> tuple[int | None, list[AppointmentJob]]:
+    """Load sequential appointment jobs from a TOML configuration file."""
+
+    try:
+        with config_path.expanduser().open("rb") as config_file:
+            config_data = tomllib.load(config_file)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"Configuration file not found: {config_path}"
+        ) from exc
+
+    settings = config_data.get("settings", {})
+    interval_raw = settings.get("loop_interval_seconds", 30)
+    if interval_raw is None:
+        interval_seconds: int | None = None
+    elif isinstance(interval_raw, int):
+        interval_seconds = interval_raw
+    else:
+        raise ValueError("'loop_interval_seconds' must be an integer or null.")
+
+    jobs_data = config_data.get("jobs")
+    if not jobs_data:
+        raise ValueError("Configuration file must define at least one job.")
+
+    jobs: list[AppointmentJob] = []
+    for idx, job_cfg in enumerate(jobs_data, start=1):
+        if not isinstance(job_cfg, dict):  # pragma: no cover - defensive
+            raise ValueError("Each job configuration must be a TOML table.")
+
+        label = str(job_cfg.get("label") or f"job{idx}")
+
+        try:
+            region = int(job_cfg["region"])
+        except KeyError as exc:
+            raise ValueError(
+                f"Job '{label}' is missing required 'region' field."
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Job '{label}' has invalid region value.") from exc
+
+        specialty = _parse_specialty(job_cfg.get("specialty"), label)
+
+        clinic = _parse_optional_int(job_cfg.get("clinic"), "clinic", label)
+        doctor = _parse_optional_int(job_cfg.get("doctor"), "doctor", label)
+        language = _parse_optional_int(job_cfg.get("language"), "language", label)
+
+        start_date = _parse_optional_date(job_cfg.get("date"), "date", label)
+        if start_date is None:
+            start_date = datetime.date.today()
+        end_date = _parse_optional_date(job_cfg.get("enddate"), "enddate", label)
+
+        notification = job_cfg.get("notification")
+        if notification is not None:
+            notification = str(notification)
+        title = job_cfg.get("title")
+        if title is not None:
+            title = str(title)
+
+        jobs.append(
+            AppointmentJob(
+                label=label,
+                region=region,
+                specialty=specialty,
+                clinic=clinic,
+                doctor=doctor,
+                start_date=start_date,
+                end_date=end_date,
+                language=language,
+                notification=notification,
+                title=title,
+            )
+        )
+
+    return interval_seconds, jobs
+
+
+def run_appointment_jobs(
+        auth: "Authenticator",
+        finder: "AppointmentFinder",
+        jobs: list[AppointmentJob],
+        interval_seconds: int | None,
+        *,
+        max_cycles: int | None = None,
+) -> None:
+    """Execute configured jobs sequentially at a global interval."""
+
+    seen_appointments: dict[str, set[str]] = {job.label: set() for job in jobs}
+    cycles_completed = 0
+
+    while True:
+        for job in jobs:
+            log.info(
+                "Running job '%s' (region=%s, specialty=%s)",
+                job.label,
+                job.region,
+                job.specialty,
+            )
+
+            try:
+                auth.refresh_token()
+            except InvalidGrantError as exc:
+                log.warning(
+                    "Token refresh failed for job '%s': %s", job.label, exc
+                )
+                log.info("Attempting to re-login before continuing...")
+                auth.login()
+                time.sleep(5)
+                continue
+            except Exception as exc:  # pragma: no cover - defensive
+                log.error(
+                    "Unexpected error refreshing token for job '%s': %s",
+                    job.label,
+                    exc,
+                )
+                continue
+
+            try:
+                appointments = finder.find_appointments(
+                    job.region,
+                    job.specialty,
+                    job.clinic,
+                    job.start_date,
+                    job.end_date,
+                    job.language,
+                    job.doctor,
+                )
+            except ExpiredToken as exc:
+                log.warning("Expired token error for job '%s': %s", job.label, exc)
+                continue
+            except Exception as exc:  # pragma: no cover - defensive
+                log.error("Error while running job '%s': %s", job.label, exc)
+                continue
+
+            seen = seen_appointments[job.label]
+            new_appointments: list[dict[str, Any]] = []
+            for appointment in appointments:
+                fingerprint = appointment_fingerprint(appointment)
+                if fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+                new_appointments.append(appointment)
+
+            display_appointments(new_appointments)
+
+            if new_appointments:
+                Notifier.send_notification(
+                    new_appointments,
+                    job.notification,
+                    job.title,
+                )
+
+        cycles_completed += 1
+        if max_cycles is not None and cycles_completed >= max_cycles:
+            log.info(
+                "Completed %s cycle(s); exiting find-appointments after reaching the limit.",
+                cycles_completed,
+            )
+            break
+
+        if interval_seconds is None or interval_seconds <= 0:
+            log.info("Global interval disabled; exiting after one run of all jobs.")
+            break
+
+        log.info(
+            "Sleeping for %s second(s) before restarting configured jobs.",
+            interval_seconds,
+        )
+        time.sleep(interval_seconds)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Find appointment slots.")
@@ -1044,6 +1301,16 @@ def main() -> None:
     clinics.add_argument("-r", "--region", required=True, type=int, help="Region ID")
     clinics.add_argument(
         "-s", "--specialty", required=True, type=int, nargs="+", help="Specialty ID(s)"
+    )
+
+    find_appointments_parser = subparsers.add_parser(
+        "find-appointments", help="Run appointment jobs defined in a TOML file"
+    )
+    find_appointments_parser.add_argument(
+        "--config",
+        type=pathlib.Path,
+        default=pathlib.Path("appointments.toml"),
+        help="Path to the appointments configuration file (default: appointments.toml)",
     )
 
     argcomplete.autocomplete(parser)
@@ -1147,6 +1414,25 @@ def main() -> None:
                 f"medichaser crashed during run:\n {e}",
             )
             raise
+
+    elif args.command == "find-appointments":
+        config_path: pathlib.Path = args.config
+        try:
+            interval_seconds, jobs = load_jobs_from_config(config_path)
+        except FileNotFoundError as exc:
+            log.error(str(exc))
+            sys.exit(1)
+        except ValueError as exc:
+            log.error("Invalid configuration file '%s': %s", config_path, exc)
+            sys.exit(1)
+
+        log.info(
+            "Starting sequential appointments runner with %s job(s) using %s.",
+            len(jobs),
+            config_path,
+        )
+
+        run_appointment_jobs(auth, finder, jobs, interval_seconds)
 
     elif args.command == "list-filters":
         # Authenticate
