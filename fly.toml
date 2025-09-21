@@ -1,34 +1,19 @@
-app = "medichaser"
-primary_region = "waw"
+# fly.toml app configuration file generated for medichaser on 2025-09-21T12:06:18+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'medichaser'
+primary_region = 'waw'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  APPOINTMENTS_CONFIG = "/app/data/appointments.toml"
-  PYTHONUNBUFFERED = "1"
+  PYTHONUNBUFFERED = '1'
 
 [processes]
-  web = "ttyd -W bash"
-  watcher = [
-    "/bin/sh",
-    "-c",
-    "python medichaser.py find-appointments --config ${APPOINTMENTS_CONFIG}"
-  ]
+  watcher = 'python medichaser.py find-appointments --config appointments.toml'
 
-[[services]]
-  processes = ["web"]
-  internal_port = 7681
-  protocol = "tcp"
-
-  [[services.ports]]
-    handlers = ["http"]
-    port = 80
-
-  [[services.ports]]
-    handlers = ["tls", "http"]
-    port = 443
-
-[[mounts]]
-  source = "medichaser_data"
-  destination = "/app/data"
+[[vm]]
+  size = 'shared-cpu-1x'

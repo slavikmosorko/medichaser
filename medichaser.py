@@ -877,12 +877,12 @@ class Notifier:
                 else "N/A"
             )
             message = (
-                f"Date: {date}\n"
-                f"Clinic: {clinic}\n"
-                f"Doctor: {doctor}\n"
-                f"Languages: {languages}\n"
-                + f"Specialty: {specialty}\n"
-                + "--------------------------------------------------"
+                f"📅 <b>Date:</b> {date}\n"
+                f"🏥 <b>Clinic:</b> {clinic}\n"
+                f"👨‍⚕️ <b>Doctor:</b> {doctor}\n"
+                f"🗣 <b>Languages:</b> {languages}\n"
+                f"🔬 <b>Specialty:</b> {specialty}\n"
+                "━━━━━━━━━━━━━━━━━━━━━━"
             )
             messages.append(message)
         return "\n".join(messages)
@@ -1154,7 +1154,6 @@ def run_find_appointment(
     password: str,
     seen_store: SeenNotificationStore,
     *,
-    command_name: str = "find-appointment",
     job_label: str | None = None,
 ) -> None:
     job_log = create_job_logger(job_label)
@@ -1170,19 +1169,6 @@ def run_find_appointment(
     time.sleep(5)
 
     finder = AppointmentFinder(auth.session, auth.headers)
-
-    if getattr(args, "interval", None) is not None:
-        args_payload = {
-            key: value
-            for key, value in vars(args).items()
-            if key != "command"
-        }
-        Notifier.send_notification(
-            [],
-            args.notification,
-            f"medichaser started in interval with command: {command_name} and arguments: {json.dumps(args_payload, indent=2, default=json_date_serializer)}",
-        )
-
     next_run = NextRun(args.interval)
     previous_appointments: list[dict[str, Any]] = []
 
@@ -1427,7 +1413,6 @@ def main() -> None:
             username,
             password,
             seen_store,
-            command_name="find-appointment",
         )
         return
 

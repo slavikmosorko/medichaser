@@ -237,28 +237,20 @@ This repository includes a ready-to-use [`fly.toml`](./fly.toml). The configurat
     fly launch --copy-config --no-deploy
     ```
 
-3. **Create a persistent volume for tokens, logs, and configuration:**
-
-    ```bash
-    fly volumes create medichaser_data --size 1 --region <REGION>
-    ```
-
-4. **Store your Medicover credentials and notifier secrets:**
+3. **Store your Medicover credentials and notifier secrets:**
 
     ```bash
     fly secrets set MEDICOVER_USER="username" MEDICOVER_PASS="password"
     # Add additional notifier secrets as needed
     ```
 
-5. **Deploy the application:**
+4. **Deploy the application:**
 
     ```bash
     fly deploy --remote-only
     ```
 
-6. **Upload the appointment configuration.** Open the web terminal served by the `web` process (`https://<app-name>.fly.dev`) and copy `appointments.toml` to `/app/data/appointments.toml` (the path referenced by `APPOINTMENTS_CONFIG`).
-
-7. **Start the watcher process:**
+5. **Start the watcher process:**
 
     ```bash
     fly scale count watcher=1
@@ -266,7 +258,7 @@ This repository includes a ready-to-use [`fly.toml`](./fly.toml). The configurat
 
     Adjust the count or the `max_parallel` value inside `appointments.toml` if you need to change concurrency later.
 
-8. **Monitor the service:**
+6. **Monitor the service:**
 
     ```bash
     fly logs --process watcher

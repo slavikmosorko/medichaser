@@ -61,7 +61,7 @@ ENV HISTFILE=/app/data/.bash_history
 
 WORKDIR /app
 
-COPY medichaser.py notifications.py LICENSE ./
+COPY appointments.toml medichaser.py notifications.py LICENSE ./
 
 EXPOSE 7681
 ENTRYPOINT ["/usr/bin/tini", "--"]
