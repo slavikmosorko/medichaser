@@ -852,7 +852,7 @@ class Notifier:
         if not appointments:
             return "No appointments found."
 
-        messages = []
+        messages: list[str] = []
         for appointment in appointments:
             date = appointment.get("appointmentDate", "N/A")
             clinic = appointment.get("clinic", {}).get("name", "N/A")
@@ -864,16 +864,18 @@ class Notifier:
                 if doctor_languages
                 else "N/A"
             )
-            message = (
-                    f"Date: {date}\n"
-                    f"Clinic: {clinic}\n"
-                    f"Doctor: {doctor}\n"
-                    f"Languages: {languages}\n"
-                    + f"Specialty: {specialty}\n"
-                    + "--------------------------------------------------"
-            )
+
+            fields = [
+                ("📅 Date", date),
+                ("🏥 Clinic", clinic),
+                ("👨‍⚕️ Doctor", doctor),
+                ("🩺 Specialty", specialty),
+                ("🗣️ Languages", languages),
+            ]
+            message = "\n".join(f"{label}: {value}" for label, value in fields)
             messages.append(message)
-        return "\n".join(messages)
+
+        return "\n\n".join(messages)
 
     @staticmethod
     @tenacity.retry(

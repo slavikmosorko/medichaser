@@ -562,11 +562,11 @@ class TestNotifier:
 
         result = Notifier.format_appointments(appointments)
 
-        assert "Date: 2025-01-01T10:00:00" in result
-        assert "Clinic: Test Clinic" in result
-        assert "Doctor: Dr. Test" in result
-        assert "Specialty: Cardiology" in result
-        assert "Languages: English, Polish" in result
+        assert "📅 Date: 2025-01-01T10:00:00" in result
+        assert "🏥 Clinic: Test Clinic" in result
+        assert "👨‍⚕️ Doctor: Dr. Test" in result
+        assert "🩺 Specialty: Cardiology" in result
+        assert "🗣️ Languages: English, Polish" in result
 
     def test_format_appointments_multiple(self) -> None:
         """Test formatting multiple appointments."""
@@ -589,12 +589,13 @@ class TestNotifier:
 
         result = Notifier.format_appointments(appointments)
 
-        assert "Clinic 1" in result
-        assert "Clinic 2" in result
-        assert "Dr. One" in result
-        assert "Dr. Two" in result
-        assert "Languages: N/A" in result  # First appointment has no languages
-        assert "Languages: Polish" in result  # Second appointment has Polish
+        assert "🏥 Clinic: Clinic 1" in result
+        assert "🏥 Clinic: Clinic 2" in result
+        assert "👨‍⚕️ Doctor: Dr. One" in result
+        assert "👨‍⚕️ Doctor: Dr. Two" in result
+        assert "🗣️ Languages: N/A" in result  # First appointment has no languages
+        assert "🗣️ Languages: Polish" in result  # Second appointment has Polish
+        assert "\n\n" in result  # Appointments separated by a blank line for readability
 
     def test_send_notification_pushbullet(
             self, monkeypatch: pytest.MonkeyPatch
@@ -1127,7 +1128,7 @@ class TestNotificationFunctions:
         telegram_notify("Test message", "Test title")
 
         mock_telegram.notify.assert_called_once_with(
-            message="<b>Test title</b>\nTest message", parse_mode="html"
+            message="<b>Test title</b>\n\nTest message", parse_mode="html"
         )
 
     def test_telegram_notify_without_title(
