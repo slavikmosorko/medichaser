@@ -21,10 +21,8 @@
 
 import argparse
 import base64
-import concurrent.futures
 import datetime
 import hashlib
-import heapq
 import json
 import logging
 import os
@@ -39,7 +37,6 @@ import time
 import tomllib
 import uuid
 from dataclasses import dataclass
-from itertools import count
 from logging.handlers import RotatingFileHandler
 from typing import Any, cast
 from urllib.parse import parse_qs, quote_plus, unquote_plus, urlparse
@@ -1010,7 +1007,7 @@ class ParallelConfig:
     """Configuration for running multiple appointment searches."""
 
     jobs: list[ParallelJob]
-    max_parallel: int | None = None
+    loop_interval_seconds: float = 30.0
 
 
 def create_job_logger(label: str | None) -> logging.Logger:
@@ -1048,10 +1045,20 @@ def load_parallel_config(config_path: pathlib.Path) -> ParallelConfig:
     if not isinstance(raw_jobs, list) or not raw_jobs:
         raise ValueError("Configuration must define at least one job in [[jobs]].")
 
-    max_parallel = settings.get("max_parallel")
-    if max_parallel is not None:
-        if not isinstance(max_parallel, int) or max_parallel < 1:
-            raise ValueError("settings.max_parallel must be a positive integer if provided.")
+    loop_interval_value = settings.get("loop_interval_seconds")
+    if loop_interval_value is None:
+        loop_interval = 30.0
+    else:
+        try:
+            loop_interval = float(loop_interval_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "settings.loop_interval_seconds must be a non-negative number if provided."
+            ) from exc
+        if loop_interval < 0:
+            raise ValueError(
+                "settings.loop_interval_seconds must be a non-negative number if provided."
+            )
 
     jobs: list[ParallelJob] = []
     for index, job in enumerate(raw_jobs, start=1):
@@ -1125,7 +1132,7 @@ def load_parallel_config(config_path: pathlib.Path) -> ParallelConfig:
 
         jobs.append(ParallelJob(args=args, label=label))
 
-    return ParallelConfig(jobs=jobs, max_parallel=max_parallel)
+    return ParallelConfig(jobs=jobs, loop_interval_seconds=loop_interval)
 
 
 class NextRun:
@@ -1326,27 +1333,8 @@ def run_parallel(
     username: str,
     password: str,
     seen_store: SeenNotificationStore,
-    override_parallel: int | None = None,
 ) -> None:
     config = load_parallel_config(config_path)
-
-    parallel_limit = override_parallel or config.max_parallel or len(config.jobs)
-    if parallel_limit < 1:
-        raise ValueError("Parallel limit must be at least 1.")
-
-    if len(config.jobs) > parallel_limit:
-        log.info(
-            "Running %s jobs with a parallel limit of %s. Remaining jobs will start when slots free up.",
-            len(config.jobs),
-            parallel_limit,
-        )
-    else:
-        log.info(
-            "Running %s jobs with a parallel limit of %s.",
-            len(config.jobs),
-            parallel_limit,
-        )
-
     runners = [
         AppointmentJobRunner(
             job.args,
@@ -1358,77 +1346,34 @@ def run_parallel(
         for job in config.jobs
     ]
 
-    schedule: list[tuple[float, int, AppointmentJobRunner]] = []
-    start_time = time.monotonic()
-    order_counter = count()
-    for runner in runners:
-        heapq.heappush(schedule, (start_time, next(order_counter), runner))
+    if not runners:
+        log.info("No jobs configured. Nothing to run.")
+        return
 
-    active_futures: dict[concurrent.futures.Future[float], AppointmentJobRunner] = {}
+    log.info(
+        "Running %s jobs sequentially with a loop interval of %s seconds.",
+        len(runners),
+        config.loop_interval_seconds,
+    )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_limit) as executor:
-        try:
-            while schedule or active_futures:
-                now = time.monotonic()
-                while (
-                    schedule
-                    and len(active_futures) < parallel_limit
-                    and schedule[0][0] <= now
-                ):
-                    _, _, runner = heapq.heappop(schedule)
-                    future = executor.submit(runner.run_cycle)
-                    active_futures[future] = runner
-
-                if not active_futures:
-                    if schedule:
-                        wait_time = max(0.0, schedule[0][0] - time.monotonic())
-                        if wait_time > 0:
-                            time.sleep(wait_time)
-                        continue
-                    break
-
-                timeout = None
-                if schedule:
-                    timeout = max(0.0, schedule[0][0] - time.monotonic())
-
-                done, _ = concurrent.futures.wait(
-                    list(active_futures.keys()),
-                    timeout=timeout,
-                    return_when=concurrent.futures.FIRST_COMPLETED,
-                )
-
-                if not done:
+    try:
+        while True:
+            active_found = False
+            for runner in runners:
+                if not runner.active:
                     continue
+                active_found = True
+                runner.run_cycle()
 
-                for future in done:
-                    runner = active_futures.pop(future)
-                    try:
-                        wait_time = future.result()
-                    except KeyboardInterrupt:
-                        log.info("Received interrupt, cancelling parallel jobs.")
-                        for remaining in active_futures:
-                            remaining.cancel()
-                        raise
-                    except Exception as exc:  # pragma: no cover - safety net
-                        log.error(
-                            "Parallel appointment job terminated with exception: %s",
-                            exc,
-                        )
-                        for remaining in active_futures:
-                            remaining.cancel()
-                        raise
+            if not active_found:
+                log.info("All jobs have completed. Exiting scheduler.")
+                break
 
-                    if runner.active:
-                        next_run_at = time.monotonic() + (wait_time or 0.0)
-                        heapq.heappush(
-                            schedule,
-                            (next_run_at, next(order_counter), runner),
-                        )
-        except KeyboardInterrupt:
-            log.info("Received interrupt, cancelling parallel jobs.")
-            for future in active_futures:
-                future.cancel()
-            raise
+            if config.loop_interval_seconds > 0:
+                time.sleep(config.loop_interval_seconds)
+    except KeyboardInterrupt:
+        log.info("Received interrupt, stopping sequential jobs.")
+        raise
 
 
 def main() -> None:
@@ -1495,7 +1440,7 @@ def main() -> None:
 
     find_appointments = subparsers.add_parser(
         "find-appointments",
-        help="Run multiple appointment searches in parallel",
+        help="Run multiple appointment searches sequentially from a configuration file",
     )
     find_appointments.add_argument(
         "-c",
@@ -1503,12 +1448,6 @@ def main() -> None:
         required=True,
         type=pathlib.Path,
         help="Path to TOML configuration file with [[jobs]] entries",
-    )
-    find_appointments.add_argument(
-        "-m",
-        "--max-parallel",
-        type=int,
-        help="Override maximum number of concurrent searches",
     )
 
     list_filters = subparsers.add_parser("list-filters", help="List filters")
@@ -1562,7 +1501,6 @@ def main() -> None:
             username,
             password,
             seen_store,
-            args.max_parallel,
         )
         return
 

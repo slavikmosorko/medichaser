@@ -1,5 +1,5 @@
 [settings]
-max_parallel = 3
+loop_interval_seconds = 30
 
 [[jobs]]
 label = "endo-phone"
