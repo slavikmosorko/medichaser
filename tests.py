@@ -16,11 +16,10 @@
 
 import datetime
 import json
-import pathlib
 import typing
 from argparse import Namespace
 from typing import Any
-from unittest.mock import ANY, MagicMock, Mock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 import requests
@@ -33,14 +32,9 @@ from medichaser import (
     MFAError,
     NextRun,
     Notifier,
-    ParallelConfig,
-    ParallelJob,
-    SeenNotificationStore,
     display_appointments,
     json_date_serializer,
-    load_parallel_config,
     main,
-    run_parallel,
 )
 from notifications import (
     gotify_notify,
@@ -88,7 +82,7 @@ class TestAuthenticator:
         assert auth.driver is None
 
     def test_refresh_token_no_refresh_token(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test refresh_token when no refresh token is available."""
         mock_log = Mock()
@@ -182,7 +176,7 @@ class TestAuthenticator:
         assert "User-Agent" in auth.headers
 
     def test_get_or_create_device_id_no_file(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test _get_or_create_device_id when no file exists."""
         mock_device_id_path = Mock()
@@ -200,7 +194,7 @@ class TestAuthenticator:
         mock_device_id_path.write_text.assert_called_once()
 
     def test_get_or_create_device_id_file_exists(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test _get_or_create_device_id when file exists."""
         mock_device_id_path = Mock()
@@ -215,7 +209,7 @@ class TestAuthenticator:
         assert auth.device_id == "existing-device-id"
 
     def test_get_or_create_device_id_corrupted_file(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test _get_or_create_device_id with a corrupted file."""
         mock_log = Mock()
@@ -236,7 +230,7 @@ class TestAuthenticator:
         mock_device_id_path.write_text.assert_called_once()
 
     def test_load_token_from_storage_no_file(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test _load_token_from_storage when no token file exists."""
         mock_token_path = Mock()
@@ -247,7 +241,7 @@ class TestAuthenticator:
         assert not auth._load_token_from_storage()
 
     def test_load_token_from_storage_valid_token(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test _load_token_from_storage with a valid, non-expired token."""
         mock_token_path = Mock()
@@ -267,7 +261,7 @@ class TestAuthenticator:
         assert auth.headers["Authorization"] == "Bearer valid_access"
 
     def test_load_token_from_storage_expired_token(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test _load_token_from_storage with an expired token."""
         mock_token_path = Mock()
@@ -285,7 +279,7 @@ class TestAuthenticator:
         assert not auth._load_token_from_storage()
 
     def test_load_token_from_storage_corrupted_file(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test _load_token_from_storage with a corrupted JSON file."""
         mock_token_path = Mock()
@@ -299,7 +293,7 @@ class TestAuthenticator:
         mock_token_path.unlink.assert_called_once()
 
     def test_load_token_from_storage_incomplete_file(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test _load_token_from_storage with incomplete token data."""
         mock_token_path = Mock()
@@ -314,7 +308,7 @@ class TestAuthenticator:
         mock_token_path.unlink.assert_called_once()
 
     def test_login_with_valid_stored_token(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test the main login orchestrator with a valid stored token."""
         auth = Authenticator("user", "pass")
@@ -338,7 +332,7 @@ class TestAuthenticator:
         mock_refresh.assert_called_once()
 
     def test_login_fallback_to_selenium_no_load(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test login falls back to Selenium when requests login fails."""
         auth = Authenticator("user", "pass")
@@ -361,7 +355,7 @@ class TestAuthenticator:
         mock_login_selenium.assert_called_once()
 
     def test_login_fallback_to_selenium_invalid_grant(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test login falls back to Selenium when requests login fails."""
         auth = Authenticator("user", "pass")
@@ -468,7 +462,7 @@ class TestAppointmentFinder:
         mock_http_get.assert_called_once()
 
     def test_find_appointments_with_filters(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test appointment finding with all filters."""
         mock_session = Mock()
@@ -496,7 +490,7 @@ class TestAppointmentFinder:
         assert "DoctorIds" in params
 
     def test_find_appointments_with_end_date_filter(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test appointment finding with end date filtering."""
         mock_session = Mock()
@@ -564,11 +558,11 @@ class TestNotifier:
 
         result = Notifier.format_appointments(appointments)
 
-        assert "<b>Date:</b> 2025-01-01T10:00:00" in result
-        assert "<b>Clinic:</b> Test Clinic" in result
-        assert "<b>Doctor:</b> Dr. Test" in result
-        assert "<b>Specialty:</b> Cardiology" in result
-        assert "<b>Languages:</b> English, Polish" in result
+        assert "Date: 2025-01-01T10:00:00" in result
+        assert "Clinic: Test Clinic" in result
+        assert "Doctor: Dr. Test" in result
+        assert "Specialty: Cardiology" in result
+        assert "Languages: English, Polish" in result
 
     def test_format_appointments_multiple(self) -> None:
         """Test formatting multiple appointments."""
@@ -591,15 +585,15 @@ class TestNotifier:
 
         result = Notifier.format_appointments(appointments)
 
-        assert "<b>Clinic:</b> Clinic 1" in result
-        assert "<b>Clinic:</b> Clinic 2" in result
-        assert "<b>Doctor:</b> Dr. One" in result
-        assert "<b>Doctor:</b> Dr. Two" in result
-        assert "<b>Languages:</b> N/A" in result  # First appointment has no languages
-        assert "<b>Languages:</b> Polish" in result  # Second appointment has Polish
+        assert "Clinic 1" in result
+        assert "Clinic 2" in result
+        assert "Dr. One" in result
+        assert "Dr. Two" in result
+        assert "Languages: N/A" in result  # First appointment has no languages
+        assert "Languages: Polish" in result  # Second appointment has Polish
 
     def test_send_notification_pushbullet(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test sending notification via pushbullet."""
         mock_pushbullet = Mock()
@@ -712,7 +706,7 @@ class TestUtilityFunctions:
         mock_log.info.assert_any_call("No new appointments found.")
 
     def test_display_appointments_with_data(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test display_appointments with appointment data."""
         mock_log = Mock()
@@ -766,7 +760,7 @@ class TestNotificationFunctions:
         mock_pushbullet.notify.assert_called_once_with(message="Test message")
 
     def test_pushbullet_notify_bad_arguments(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test pushbullet notification with bad arguments."""
         mock_pushbullet = Mock()
@@ -812,7 +806,7 @@ class TestNotificationFunctions:
         mock_pushover.notify.assert_called_once_with(message="Test message")
 
     def test_pushover_notify_bad_arguments(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test pushover notification with bad arguments."""
         mock_pushover = Mock()
@@ -845,7 +839,7 @@ class TestNotificationFunctions:
         assert "Pushover notification failed" in mock_print.call_args[0][0]
 
     def test_telegram_notify_bad_arguments(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test telegram notification with bad arguments."""
         mock_telegram = Mock()
@@ -940,7 +934,7 @@ class TestNotificationFunctions:
         )
 
     def test_telegram_notify_without_title(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test telegram notification without title."""
         mock_telegram = Mock()
@@ -1032,7 +1026,7 @@ class TestNotificationFunctions:
         assert "GOTIFY notifications require" in mock_print.call_args[0][0]
 
     def test_gotify_notify_default_priority(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test Gotify notification with default priority."""
         mock_environ: dict[str, str] = {
@@ -1053,7 +1047,7 @@ class TestNotificationFunctions:
         )
 
     def test_gotify_notify_request_exception(
-        self, monkeypatch: pytest.MonkeyPatch
+            self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test Gotify notification with request exception."""
         mock_environ = {
@@ -1141,44 +1135,10 @@ def test_main_find_appointment_single_run(monkeypatch: pytest.MonkeyPatch) -> No
     mock_finder_instance.find_appointments.assert_called_once_with(
         1, [2], 3, datetime.date(2025, 1, 1), datetime.date(2025, 1, 31), 6, 4
     )
-    mock_display.assert_called_once_with(
-        [{"id": 1, "name": "Appointment"}], logger=ANY
-    )
+    mock_display.assert_called_once_with([{"id": 1, "name": "Appointment"}])
     mock_notifier.assert_called_once_with(
         [{"id": 1, "name": "Appointment"}], "pushbullet", "Test"
     )
-
-
-def test_main_find_appointments(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """Test invoking the sequential find-appointments command."""
-
-    config_path = tmp_path / "jobs.toml"
-    config_path.write_text("", encoding="utf-8")
-
-    mock_args = Namespace(
-        command="find-appointments",
-        config=config_path,
-    )
-
-    mock_parser = MagicMock()
-    mock_parser.parse_args.return_value = mock_args
-    monkeypatch.setattr("argparse.ArgumentParser", lambda **kwargs: mock_parser)
-
-    monkeypatch.setattr(
-        "os.environ", {"MEDICOVER_USER": "user", "MEDICOVER_PASS": "pass"}
-    )
-
-    mock_run_parallel = MagicMock()
-    monkeypatch.setattr("medichaser.run_parallel", mock_run_parallel)
-
-    main()
-
-    mock_run_parallel.assert_called_once()
-    called_args = mock_run_parallel.call_args[0]
-    assert called_args[0] is config_path
-    assert called_args[1] == "user"
-    assert called_args[2] == "pass"
-    assert isinstance(called_args[3], SeenNotificationStore)
 
 
 def test_main_list_filters_regions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1331,8 +1291,6 @@ def test_main_find_appointment_interval_run(monkeypatch: pytest.MonkeyPatch) -> 
 
     mock_next_run_instance = MagicMock()
     mock_next_run_instance.is_time_to_run.side_effect = mock_is_time_to_run
-    mock_next_run_instance.time_until_next_run = lambda: 0
-    mock_next_run_instance.set_next_run = MagicMock()
     monkeypatch.setattr("medichaser.NextRun", lambda i: mock_next_run_instance)
 
     monkeypatch.setattr("time.sleep", lambda t: None)
@@ -1341,106 +1299,17 @@ def test_main_find_appointment_interval_run(monkeypatch: pytest.MonkeyPatch) -> 
         main()
 
     assert mock_auth_instance.login.call_count == 2
-    assert mock_auth_instance.refresh_token.call_count >= 4
+    assert mock_auth_instance.refresh_token.call_count == 4
     assert mock_finder_instance.find_appointments.call_count == 2
 
-    mock_display.assert_any_call(
-        [{"id": 1, "name": "Appointment 1"}], logger=ANY
-    )
+    mock_display.assert_any_call([{"id": 1, "name": "Appointment 1"}])
     mock_notifier.assert_any_call(
         [{"id": 1, "name": "Appointment 1"}], "pushover", "Interval Test"
     )
 
-    mock_display.assert_any_call(
-        [{"id": 2, "name": "Appointment 2"}], logger=ANY
-    )
+    mock_display.assert_any_call([{"id": 2, "name": "Appointment 2"}])
     mock_notifier.assert_any_call(
         [{"id": 2, "name": "Appointment 2"}], "pushover", "Interval Test"
-    )
-
-
-def test_main_find_appointment_reappearance(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ensure notifications are sent only once for the same appointment."""
-
-    mock_args = Namespace(
-        command="find-appointment",
-        region=1,
-        specialty=[2],
-        clinic=3,
-        doctor=4,
-        language=6,
-        date=datetime.date(2025, 1, 1),
-        enddate=datetime.date(2025, 1, 31),
-        interval=10,
-        notification="telegram",
-        title="Reappearance Test",
-    )
-
-    mock_parser = MagicMock()
-    mock_parser.parse_args.return_value = mock_args
-    monkeypatch.setattr("argparse.ArgumentParser", lambda **kwargs: mock_parser)
-
-    monkeypatch.setattr(
-        "os.environ", {"MEDICOVER_USER": "user", "MEDICOVER_PASS": "pass"}
-    )
-
-    mock_auth_instance = MagicMock()
-    mock_auth_instance.refresh_token.side_effect = [None, None, None, None]
-    monkeypatch.setattr("medichaser.Authenticator", lambda u, p: mock_auth_instance)
-
-    mock_finder_instance = MagicMock()
-    mock_finder_instance.find_appointments.side_effect = [
-        [{"id": 1, "name": "Appointment 1"}],
-        [],
-        [{"id": 1, "name": "Appointment 1"}],
-    ]
-    monkeypatch.setattr(
-        "medichaser.AppointmentFinder", lambda s, h: mock_finder_instance
-    )
-
-    mock_notifier = MagicMock()
-    monkeypatch.setattr("medichaser.Notifier.send_notification", mock_notifier)
-
-    mock_display = MagicMock()
-    monkeypatch.setattr("medichaser.display_appointments", mock_display)
-
-    run_count = 0
-
-    def mock_is_time_to_run() -> typing.Literal[True]:
-        nonlocal run_count
-        run_count += 1
-        if run_count > 3:
-            raise StopIteration
-        return True
-
-    mock_next_run_instance = MagicMock()
-    mock_next_run_instance.is_time_to_run.side_effect = mock_is_time_to_run
-    mock_next_run_instance.time_until_next_run = lambda: 0
-    mock_next_run_instance.set_next_run = MagicMock()
-    mock_next_run_instance.interval_minutes = 10
-    monkeypatch.setattr("medichaser.NextRun", lambda i: mock_next_run_instance)
-
-    monkeypatch.setattr("time.sleep", lambda t: None)
-
-    with pytest.raises(StopIteration):
-        main()
-
-    appointment_calls = [
-        call_args
-        for call_args in (
-            (args, kwargs) for args, kwargs in mock_notifier.call_args_list
-        )
-        if call_args[0] and call_args[0][0]
-    ]
-
-    assert len(appointment_calls) == 1
-    args, _ = appointment_calls[0]
-    assert args[0] == [{"id": 1, "name": "Appointment 1"}]
-    assert args[1] == "telegram"
-    assert args[2] == "Reappearance Test"
-
-    mock_display.assert_any_call(
-        [{"id": 1, "name": "Appointment 1"}], logger=ANY
     )
 
 
@@ -1483,117 +1352,3 @@ def test_main_list_filters_clinics(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_auth_instance.refresh_token.assert_called_once()
     mock_finder_instance.find_filters.assert_called_once_with(1, [2, 3])
     mock_log.info.assert_called_with("1 - Clinic 1")
-
-
-def test_load_parallel_config_success(tmp_path: Any) -> None:
-    """Ensure sequential job configuration is parsed correctly."""
-
-    config_path = tmp_path / "appointments.toml"
-    config_path.write_text(
-        """
-        [settings]
-        loop_interval_seconds = 15
-
-        [[jobs]]
-        label = "endo"
-        region = 202
-        specialty = [27962]
-        doctor = 334258
-        notification = "telegram"
-        title = " Endokrynolog dorośli - porada telefoniczna"
-        interval = 5
-        date = 2025-01-01
-
-        [[jobs]]
-        region = 202
-        specialty = 192
-        notification = "telegram"
-        title = " Laryngolog dorośli"
-        enddate = 2025-01-31
-        """,
-        encoding="utf-8",
-    )
-
-    config = load_parallel_config(config_path)
-
-    assert config.loop_interval_seconds == 15.0
-    assert len(config.jobs) == 2
-
-    first_job = config.jobs[0]
-    assert first_job.label == "endo"
-    assert first_job.args.specialty == [27962]
-    assert first_job.args.doctor == 334258
-    assert first_job.args.interval == 5
-    assert first_job.args.date == datetime.date(2025, 1, 1)
-
-    second_job = config.jobs[1]
-    assert second_job.label is None
-    assert second_job.args.specialty == [192]
-    assert second_job.args.notification == "telegram"
-    assert second_job.args.enddate == datetime.date(2025, 1, 31)
-
-
-def test_load_parallel_config_invalid(tmp_path: Any) -> None:
-    """Invalid configuration values should raise ValueError."""
-
-    config_path = tmp_path / "bad.toml"
-    config_path.write_text(
-        """
-        [settings]
-        loop_interval_seconds = -5
-
-        [[jobs]]
-        region = 1
-        specialty = 2
-        """,
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError):
-        load_parallel_config(config_path)
-
-
-def test_run_parallel_runs_jobs_sequentially(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Jobs should be executed one after another without parallelism."""
-
-    config = ParallelConfig(
-        jobs=[
-            ParallelJob(args=Namespace(), label="job1"),
-            ParallelJob(args=Namespace(), label="job2"),
-        ],
-        loop_interval_seconds=0,
-    )
-
-    monkeypatch.setattr("medichaser.load_parallel_config", lambda path: config)
-
-    execution_order: list[str | None] = []
-
-    class StubRunner:
-        def __init__(
-            self,
-            args: Namespace,
-            username: str,
-            password: str,
-            seen_store: SeenNotificationStore,
-            *,
-            job_label: str | None = None,
-        ) -> None:
-            self.label = job_label
-            self.active = True
-
-        def run_cycle(self) -> float:
-            execution_order.append(self.label)
-            self.active = False
-            return 0.0
-
-    monkeypatch.setattr("medichaser.AppointmentJobRunner", StubRunner)
-    monkeypatch.setattr("time.sleep", lambda seconds: None)
-
-    run_parallel(
-        pathlib.Path("config.toml"),
-        "user",
-        "pass",
-        SeenNotificationStore(),
-    )
-
-    assert execution_order == ["job1", "job2"]

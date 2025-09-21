@@ -1,13 +1,3 @@
-#!/usr/bin/env python
-# PYTHON_ARGCOMPLETE_OK
-
-# GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
-# Copyright: (c) 2018, apqlzm - https://github.com/apqlzm/medihunter
-# Copyright: (c) 2025, SteveSteve24 - https://github.com/SteveSteve24/MediCzuwacz
-# Copyright: (c) 2025, rafsaf - https://github.com/rafsaf/medichaser
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
@@ -32,11 +22,8 @@ import re
 import select
 import string
 import sys
-import threading
 import time
-import tomllib
 import uuid
-from dataclasses import dataclass
 from logging.handlers import RotatingFileHandler
 from typing import Any, cast
 from urllib.parse import parse_qs, quote_plus, unquote_plus, urlparse
@@ -433,7 +420,7 @@ class Authenticator:
         return response
 
     def _exchange_code_for_token(
-        self, code: str, code_verifier: str
+            self, code: str, code_verifier: str
     ) -> None:  # pragma: no cover
         """Exchanges the authorization code for an access token."""
         log.info("Exchanging authorization code for token.")
@@ -543,10 +530,10 @@ class Authenticator:
     def refresh_token(self) -> None:
         """Refresh the access token using the refresh token."""
         if (
-            self.tokenA
-            and self.tokenR
-            and self.expires_at
-            and self.expires_at > int(time.time())
+                self.tokenA
+                and self.tokenR
+                and self.expires_at
+                and self.expires_at > int(time.time())
         ):
             log.info("access token is still valid, no need to refresh.")
             return
@@ -796,14 +783,14 @@ class AppointmentFinder:
             return {}
 
     def find_appointments(
-        self,
-        region: int,
-        specialty: list[int],
-        clinic: int | None,
-        start_date: datetime.date,
-        end_date: datetime.date | None,
-        language: int | None,
-        doctor: int | None = None,
+            self,
+            region: int,
+            specialty: list[int],
+            clinic: int | None,
+            start_date: datetime.date,
+            end_date: datetime.date | None,
+            language: int | None,
+            doctor: int | None = None,
     ) -> list[dict[str, Any]]:
         appointment_url = (
             f"{MEDICOVER_API_URL}/appointments/api/search-appointments/slots"
@@ -834,13 +821,13 @@ class AppointmentFinder:
                 x
                 for x in items
                 if datetime.datetime.fromisoformat(x["appointmentDate"]).date()
-                <= end_date
+                   <= end_date
             ]
 
         return items
 
     def find_filters(
-        self, region: int | None = None, specialty: list[int] | None = None
+            self, region: int | None = None, specialty: list[int] | None = None
     ) -> dict[str, Any]:
         filters_url = (
             f"{MEDICOVER_API_URL}/appointments/api/search-appointments/filters"
@@ -876,12 +863,12 @@ class Notifier:
                 else "N/A"
             )
             message = (
-                f"📅 <b>Date:</b> {date}\n"
-                f"🏥 <b>Clinic:</b> {clinic}\n"
-                f"👨‍⚕️ <b>Doctor:</b> {doctor}\n"
-                f"🗣 <b>Languages:</b> {languages}\n"
-                f"🔬 <b>Specialty:</b> {specialty}\n"
-                "━━━━━━━━━━━━━━━━━━━━━━"
+                    f"Date: {date}\n"
+                    f"Clinic: {clinic}\n"
+                    f"Doctor: {doctor}\n"
+                    f"Languages: {languages}\n"
+                    + f"Specialty: {specialty}\n"
+                    + "--------------------------------------------------"
             )
             messages.append(message)
         return "\n".join(messages)
@@ -893,9 +880,9 @@ class Notifier:
         reraise=True,
     )
     def send_notification(
-        appointments: list[dict[str, Any]],
-        notifier: str | None,
-        title: str | None,
+            appointments: list[dict[str, Any]],
+            notifier: str | None,
+            title: str | None,
     ) -> None:
         """Send a notification with formatted appointments."""
         message = Notifier.format_appointments(appointments)
@@ -919,17 +906,14 @@ class Notifier:
         log.info("Notification sent successfully.")
 
 
-def display_appointments(
-    appointments: list[dict[str, Any]], *, logger: logging.Logger | None = None
-) -> None:
-    active_logger = logger or log
-    active_logger.info("")
-    active_logger.info("--------------------------------------------------")
+def display_appointments(appointments: list[dict[str, Any]]) -> None:
+    log.info("")
+    log.info("--------------------------------------------------")
     if not appointments:
-        active_logger.info("No new appointments found.")
+        log.info("No new appointments found.")
     else:
-        active_logger.info("New appointments found:")
-        active_logger.info("--------------------------------------------------")
+        log.info("New appointments found:")
+        log.info("--------------------------------------------------")
         for appointment in appointments:
             date = appointment.get("appointmentDate", "N/A")
             clinic = appointment.get("clinic", {}).get("name", "N/A")
@@ -941,12 +925,12 @@ def display_appointments(
                 if doctor_languages
                 else "N/A"
             )
-            active_logger.info(f"Date: {date}")
-            active_logger.info(f"  Clinic: {clinic}")
-            active_logger.info(f"  Doctor: {doctor}")
-            active_logger.info(f"  Specialty: {specialty}")
-            active_logger.info(f"  Languages: {languages}")
-            active_logger.info("--------------------------------------------------")
+            log.info(f"Date: {date}")
+            log.info(f"  Clinic: {clinic}")
+            log.info(f"  Doctor: {doctor}")
+            log.info(f"  Specialty: {specialty}")
+            log.info(f"  Languages: {languages}")
+            log.info("--------------------------------------------------")
 
 
 def json_date_serializer(obj: Any) -> str:
@@ -954,185 +938,6 @@ def json_date_serializer(obj: Any) -> str:
     if isinstance(obj, datetime.date | datetime.datetime):
         return obj.isoformat()
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
-
-
-class PrefixLoggerAdapter(logging.LoggerAdapter):
-    """Logger adapter that prepends a prefix to all log messages."""
-
-    def process(self, msg: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        prefix = self.extra.get("prefix", "")
-        if prefix:
-            msg = f"{prefix}{msg}"
-        return msg, kwargs
-
-
-class SeenNotificationStore:
-    """Thread-safe in-memory store of sent appointment notifications."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._seen: set[str] = set()
-
-    def _make_key(self, appointment: dict[str, Any]) -> str:
-        appointment_id = appointment.get("id")
-        if appointment_id is not None:
-            return str(appointment_id)
-
-        canonical = json.dumps(appointment, sort_keys=True, default=str)
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-    def filter_new(self, appointments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Return appointments that have not triggered a notification yet."""
-
-        fresh: list[dict[str, Any]] = []
-        with self._lock:
-            for appointment in appointments:
-                key = self._make_key(appointment)
-                if key not in self._seen:
-                    self._seen.add(key)
-                    fresh.append(appointment)
-        return fresh
-
-
-@dataclass
-class ParallelJob:
-    """Configuration for a single appointment search."""
-
-    args: argparse.Namespace
-    label: str | None = None
-
-
-@dataclass
-class ParallelConfig:
-    """Configuration for running multiple appointment searches."""
-
-    jobs: list[ParallelJob]
-    loop_interval_seconds: float = 30.0
-
-
-def create_job_logger(label: str | None) -> logging.Logger:
-    """Return a logger that includes the job label in messages."""
-
-    if not label:
-        return log
-    return PrefixLoggerAdapter(log, {"prefix": f"[{label}] "})
-
-
-def _parse_date(value: Any, default: datetime.date | None = None) -> datetime.date | None:
-    if value is None:
-        return default
-    if isinstance(value, datetime.datetime):
-        return value.date()
-    if isinstance(value, datetime.date):
-        return value
-    if isinstance(value, str):
-        return datetime.date.fromisoformat(value)
-    raise ValueError(f"Unsupported date value: {value!r}")
-
-
-def load_parallel_config(config_path: pathlib.Path) -> ParallelConfig:
-    """Load appointment jobs from a TOML configuration file."""
-
-    try:
-        with config_path.open("rb") as file:
-            raw_config = tomllib.load(file)
-    except FileNotFoundError as exc:
-        raise ValueError(f"Configuration file not found: {config_path}") from exc
-
-    settings = cast(dict[str, Any], raw_config.get("settings", {}))
-    raw_jobs = raw_config.get("jobs")
-
-    if not isinstance(raw_jobs, list) or not raw_jobs:
-        raise ValueError("Configuration must define at least one job in [[jobs]].")
-
-    loop_interval_value = settings.get("loop_interval_seconds")
-    if loop_interval_value is None:
-        loop_interval = 30.0
-    else:
-        try:
-            loop_interval = float(loop_interval_value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "settings.loop_interval_seconds must be a non-negative number if provided."
-            ) from exc
-        if loop_interval < 0:
-            raise ValueError(
-                "settings.loop_interval_seconds must be a non-negative number if provided."
-            )
-
-    jobs: list[ParallelJob] = []
-    for index, job in enumerate(raw_jobs, start=1):
-        if not isinstance(job, dict):
-            raise ValueError(f"Job #{index} must be a table.")
-
-        try:
-            region = int(job["region"])
-        except KeyError as exc:  # pragma: no cover - validated in tests
-            raise ValueError(f"Job #{index} is missing required field 'region'.") from exc
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"Job #{index} has invalid region value: {job.get('region')!r}.") from exc
-
-        specialty_value = job.get("specialty")
-        if specialty_value is None:
-            raise ValueError(f"Job #{index} is missing required field 'specialty'.")
-        if isinstance(specialty_value, list):
-            try:
-                specialty = [int(item) for item in specialty_value]
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"Job #{index} has invalid specialty list: {specialty_value!r}."
-                ) from exc
-        else:
-            try:
-                specialty = [int(specialty_value)]
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"Job #{index} has invalid specialty value: {specialty_value!r}."
-                ) from exc
-
-        clinic = job.get("clinic")
-        clinic_id = int(clinic) if clinic is not None else None
-
-        doctor = job.get("doctor")
-        doctor_id = int(doctor) if doctor is not None else None
-
-        language = job.get("language")
-        language_id = int(language) if language is not None else None
-
-        interval = job.get("interval")
-        interval_minutes = int(interval) if interval is not None else None
-
-        start_date = _parse_date(job.get("date"), datetime.date.today())
-        end_date = _parse_date(job.get("enddate"))
-
-        notification = job.get("notification")
-        if notification is not None and not isinstance(notification, str):
-            raise ValueError(f"Job #{index} has invalid notification value: {notification!r}.")
-
-        title = job.get("title")
-        if title is not None and not isinstance(title, str):
-            raise ValueError(f"Job #{index} has invalid title value: {title!r}.")
-
-        label_value = job.get("label")
-        label = label_value if isinstance(label_value, str) else None
-
-        args = argparse.Namespace(
-            command="find-appointment",
-            region=region,
-            specialty=specialty,
-            clinic=clinic_id,
-            doctor=doctor_id,
-            date=start_date,
-            enddate=end_date,
-            notification=notification,
-            title=title,
-            language=language_id,
-            interval=interval_minutes,
-        )
-
-        jobs.append(ParallelJob(args=args, label=label))
-
-    return ParallelConfig(jobs=jobs, loop_interval_seconds=loop_interval)
 
 
 class NextRun:
@@ -1155,225 +960,6 @@ class NextRun:
         self.next_run = datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(
             minutes=self.interval_minutes
         )
-
-    def time_until_next_run(self) -> float:
-        if self.interval_minutes is None:
-            return 0.0
-        now = datetime.datetime.now(tz=datetime.UTC)
-        if now >= self.next_run:
-            return 0.0
-        delta = self.next_run - now
-        return max(delta.total_seconds(), 0.0)
-
-
-class AppointmentJobRunner:
-    """Execute appointment search cycles while tracking job state."""
-
-    def __init__(
-        self,
-        args: argparse.Namespace,
-        username: str,
-        password: str,
-        seen_store: SeenNotificationStore,
-        *,
-        job_label: str | None = None,
-    ) -> None:
-        self.args = args
-        self.username = username
-        self.password = password
-        self.seen_store = seen_store
-        self.job_log = create_job_logger(job_label)
-        self.next_run = NextRun(args.interval)
-        self.previous_appointments: list[dict[str, Any]] = []
-        self.active = True
-        self._auth: Authenticator | None = None
-        self._finder: AppointmentFinder | None = None
-        self._initialized = False
-
-    def _ensure_initialized(self) -> None:
-        if self._initialized:
-            return
-
-        self._auth = Authenticator(self.username, self.password)
-        try:
-            self._auth.login()
-        except MFAError:
-            self.job_log.error("Failed MFA, please try again.")
-            DEVICE_ID_PATH.unlink(missing_ok=True)
-            raise
-
-        time.sleep(5)
-        self._finder = AppointmentFinder(self._auth.session, self._auth.headers)
-        self._initialized = True
-
-    def run_cycle(self) -> float:
-        """Run a single polling cycle for the job and return delay until next run."""
-
-        self._ensure_initialized()
-        assert self._auth is not None
-        assert self._finder is not None
-
-        try:
-            try:
-                self._auth.refresh_token()
-            except InvalidGrantError as e:
-                self.job_log.warning(f"Token refresh failed: {e}")
-                self.job_log.info("Attempting to re-login...")
-                self._auth.login()
-                time.sleep(5)
-                self.job_log.info("Re-login successful, continuing...")
-                return 0.0
-
-            wait_for_next: float | None = None
-            time_until = getattr(self.next_run, "time_until_next_run", None)
-            if callable(time_until):
-                try:
-                    wait_for_next = float(time_until())
-                except (TypeError, ValueError):
-                    wait_for_next = None
-
-            should_run = True
-            if hasattr(self.next_run, "is_time_to_run"):
-                should_run = bool(self.next_run.is_time_to_run())
-
-            if not should_run:
-                if wait_for_next is not None:
-                    return min(wait_for_next, 30.0)
-                return 30.0
-
-            if wait_for_next is not None and wait_for_next > 0:
-                return min(wait_for_next, 30.0)
-
-            self.next_run.set_next_run()
-
-            try:
-                appointments = self._finder.find_appointments(
-                    self.args.region,
-                    self.args.specialty,
-                    self.args.clinic,
-                    self.args.date,
-                    self.args.enddate,
-                    self.args.language,
-                    self.args.doctor,
-                )
-            except ExpiredToken as e:
-                self.job_log.warning("Expired token error: %s", e)
-                return 0.0
-
-            if self.previous_appointments:
-                new_appointments = [
-                    appointment
-                    for appointment in appointments
-                    if appointment not in self.previous_appointments
-                ]
-            else:
-                new_appointments = appointments
-
-            self.previous_appointments = appointments
-
-            display_appointments(new_appointments, logger=self.job_log)
-
-            fresh_appointments = self.seen_store.filter_new(new_appointments)
-            if fresh_appointments:
-                Notifier.send_notification(
-                    fresh_appointments, self.args.notification, self.args.title
-                )
-
-            if self.next_run.interval_minutes is None:
-                self.job_log.info("Exiting after one run due to interval set to None.")
-                self.active = False
-                return 0.0
-
-            next_wait: float = 30.0
-            if callable(time_until):
-                try:
-                    next_wait = float(time_until())
-                except (TypeError, ValueError):
-                    next_wait = 30.0
-
-            return min(next_wait, 30.0)
-        except Exception as e:
-            self.job_log.error(f"Error in main loop: {e}")
-            Notifier.send_notification(
-                [],
-                self.args.notification,
-                f"medichaser crashed during run:\n {e}",
-            )
-            raise
-
-    def run_forever(self) -> None:
-        """Continuously run the job until it finishes or fails."""
-
-        while self.active:
-            wait_time = self.run_cycle()
-            if not self.active:
-                break
-            if wait_time > 0:
-                time.sleep(wait_time)
-
-def run_find_appointment(
-    args: argparse.Namespace,
-    username: str,
-    password: str,
-    seen_store: SeenNotificationStore,
-    *,
-    job_label: str | None = None,
-) -> None:
-    AppointmentJobRunner(
-        args,
-        username,
-        password,
-        seen_store,
-        job_label=job_label,
-    ).run_forever()
-
-
-def run_parallel(
-    config_path: pathlib.Path,
-    username: str,
-    password: str,
-    seen_store: SeenNotificationStore,
-) -> None:
-    config = load_parallel_config(config_path)
-    runners = [
-        AppointmentJobRunner(
-            job.args,
-            username,
-            password,
-            seen_store,
-            job_label=job.label,
-        )
-        for job in config.jobs
-    ]
-
-    if not runners:
-        log.info("No jobs configured. Nothing to run.")
-        return
-
-    log.info(
-        "Running %s jobs sequentially with a loop interval of %s seconds.",
-        len(runners),
-        config.loop_interval_seconds,
-    )
-
-    try:
-        while True:
-            active_found = False
-            for runner in runners:
-                if not runner.active:
-                    continue
-                active_found = True
-                runner.run_cycle()
-
-            if not active_found:
-                log.info("All jobs have completed. Exiting scheduler.")
-                break
-
-            if config.loop_interval_seconds > 0:
-                time.sleep(config.loop_interval_seconds)
-    except KeyboardInterrupt:
-        log.info("Received interrupt, stopping sequential jobs.")
-        raise
 
 
 def main() -> None:
@@ -1438,18 +1024,6 @@ def main() -> None:
         help="Repeat interval in minutes",
     )
 
-    find_appointments = subparsers.add_parser(
-        "find-appointments",
-        help="Run multiple appointment searches sequentially from a configuration file",
-    )
-    find_appointments.add_argument(
-        "-c",
-        "--config",
-        required=True,
-        type=pathlib.Path,
-        help="Path to TOML configuration file with [[jobs]] entries",
-    )
-
     list_filters = subparsers.add_parser("list-filters", help="List filters")
     list_filters_subparsers = list_filters.add_subparsers(
         dest="filter_type", required=True, help="Type of filter to list"
@@ -1484,26 +1058,6 @@ def main() -> None:
         )
         sys.exit(1)
 
-    seen_store = SeenNotificationStore()
-
-    if args.command == "find-appointment":
-        run_find_appointment(
-            args,
-            username,
-            password,
-            seen_store,
-        )
-        return
-
-    if args.command == "find-appointments":
-        run_parallel(
-            args.config,
-            username,
-            password,
-            seen_store,
-        )
-        return
-
     auth = Authenticator(username, password)
     try:
         auth.login()
@@ -1516,7 +1070,85 @@ def main() -> None:
 
     finder = AppointmentFinder(auth.session, auth.headers)
 
-    if args.command == "list-filters":
+    if args.command == "find-appointment":
+        if args.interval is not None:
+            Notifier.send_notification(
+                [],
+                args.notification,
+                f"medichaser started in interval with command: {args.command} and arguments: {json.dumps(vars(args), indent=2, default=json_date_serializer)}",
+            )
+
+        next_run = NextRun(args.interval)
+        previous_appointments: list[dict[str, Any]] = []
+
+        try:
+            while True:
+                # Authenticate
+                try:
+                    auth.refresh_token()
+                except InvalidGrantError as e:
+                    log.warning(f"Token refresh failed: {e}")
+                    log.info("Attempting to re-login...")
+                    auth.login()
+                    time.sleep(5)
+                    log.info("Re-login successful, continuing...")
+                    continue
+
+                if not next_run.is_time_to_run():
+                    time.sleep(30)
+                    continue
+
+                next_run.set_next_run()
+
+                # Find appointments
+                try:
+                    appointments = finder.find_appointments(
+                        args.region,
+                        args.specialty,
+                        args.clinic,
+                        args.date,
+                        args.enddate,
+                        args.language,
+                        args.doctor,
+                    )
+                except ExpiredToken as e:
+                    log.warning("Expired token error: %s", e)
+                    continue
+
+                # Find new appointments
+                if previous_appointments:
+                    new_appointments = [
+                        x for x in appointments if x not in previous_appointments
+                    ]
+                else:
+                    new_appointments = appointments
+
+                previous_appointments = appointments
+
+                # Display appointments
+                display_appointments(new_appointments)
+
+                # Send notification if appointments are found
+                if new_appointments:
+                    Notifier.send_notification(
+                        new_appointments, args.notification, args.title
+                    )
+
+                if next_run.interval_minutes is None:
+                    log.info("Exiting after one run due to interval set to None.")
+                    break
+
+                continue
+        except Exception as e:
+            log.error(f"Error in main loop: {e}")
+            Notifier.send_notification(
+                [],
+                args.notification,
+                f"medichaser crashed during run:\n {e}",
+            )
+            raise
+
+    elif args.command == "list-filters":
         # Authenticate
         try:
             auth.refresh_token()
