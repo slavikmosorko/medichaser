@@ -1,0 +1,31 @@
+# Example configuration for running multiple appointment searches in parallel.
+# Copy this file to appointments.toml and adjust the values to match your filters.
+
+[settings]
+max_parallel = 3
+
+[[jobs]]
+label = "endo-phone"
+region = 202
+specialty = [27962]
+doctor = 334258
+interval = 10
+notification = "telegram"
+title = " Endokrynolog dorośli - porada telefoniczna"
+
+[[jobs]]
+label = "allergy"
+region = 202
+specialty = [178]
+doctor = 499430
+interval = 10
+notification = "telegram"
+title = " Alergolog dorośli odczulani"
+
+[[jobs]]
+label = "laryngology"
+region = 202
+specialty = [192]
+interval = 10
+notification = "telegram"
+title = " Laryngolog dorośli"
